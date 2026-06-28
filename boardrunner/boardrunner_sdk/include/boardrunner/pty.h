@@ -3,7 +3,7 @@
 #include <device.h>
 
 int api_pty_fd_gen_impl(const char* dev_name);
-void api_pty_write_req(int fd, uint8_t value);
+int api_pty_write_req(int fd, uint8_t value);
 int api_pty_read_nonblock(int fd, uint8_t *buff);
 
 /* Call as api_pty_fd_gen() for the default device, or
