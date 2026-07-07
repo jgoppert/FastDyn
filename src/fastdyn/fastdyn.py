@@ -140,6 +140,9 @@ class QemuTargetOpts:
         self.probe_milestones: Optional[str] = None
         self.probe_ignores: Optional[str] = None
         self.probe_out_dir: Optional[str] = None
+        self.rtos_introspection: str = "off"
+        self.rtos_introspection_out: Optional[str] = None
+        self.rtos_introspection_max_events: int = 4096
         self.print_command = False
         self.savestate_extra_ranges: list[tuple[int, int]] = []
 
