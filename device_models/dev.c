@@ -265,9 +265,11 @@ DeviceModel* find_device_model(const char *name) {
 }
 
 void dev_notify_irq(int number) {
+#ifdef DEV_LOGGER
 	time_t sec;
     long usec;
     dev_get_timestamp(&sec, &usec);
+#endif
 	DeviceNode *head = irq_lut[number];
 #ifdef DEV_LOGGER
         if (twintrace_mode != TT_OFF) {
@@ -296,14 +298,18 @@ void dev_notify_irq(int number) {
 #ifdef DEV_LOGGER
 		utils_log_to_file(io_logger, "Skipping IRQ NUM %d handling as not registered by the user\n", number);
 #endif
+#if DEBUG_PRINT
 		printf("Skipping IRQ NUM %d handling as not registered by the user\n", number);
+#endif
 	}
 }
 
 void dev_irqret_hook(int number) {
+#ifdef DEV_LOGGER
     time_t sec;
     long usec;
     dev_get_timestamp(&sec, &usec);
+#endif
 #ifdef DEV_LOGGER
         if (twintrace_mode != TT_OFF) {
             uint64_t icount = core_get_icount();
@@ -328,7 +334,9 @@ void dev_irqret_hook(int number) {
 #ifdef DEV_LOGGER
 		utils_log_to_file(io_logger, "Skipping IRQ NUM %d handling as not registered by the user\n", number);
 #endif
+#if DEBUG_PRINT
 		printf("Skipping IRQ NUM %d handling as not registered by the user\n", number);
+#endif
 	}
 }
 
@@ -779,7 +787,9 @@ static inline AppConfig* dev_parse_models(const char *s, ModelEntry *entries, in
 
     if (config) {
         // 2. Use the configuration data
+#if DEBUG_PRINT
         dev_print_config(config);
+#endif
 
         if (config->section_count > max_entries) {
             utils_die("number of registered device models are greater than the maximum limit in the dev.c");
