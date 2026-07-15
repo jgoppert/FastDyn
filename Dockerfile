@@ -31,9 +31,11 @@ RUN apt-get update && apt-get install -y \
     libfdt-dev \
     libusb-1.0-0-dev \
     libstlink-dev \
+	libslirp0 \
+        libbpf1 \
     unzip \
     openjdk-21-jdk \
-    && rm -rf /var/lib/apt/lists/*
+	iproute2 
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -46,7 +48,7 @@ ENV PATH="${JAVA_HOME}/bin:${PATH}"
 # Install Gazebo Harmonic
 RUN curl https://packages.osrfoundation.org/gazebo.gpg --output /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/gazebo-stable.list > /dev/null && \
-    apt-get update && apt-get install -y gz-harmonic && rm -rf /var/lib/apt/lists/*
+    apt-get update && apt-get install -y gz-harmonic 
 
 WORKDIR /workspace
 
@@ -81,7 +83,7 @@ RUN rm -rf fastdyn-env && \
 RUN /bin/bash -c "source ./setup.sh --build-qemu --build-gazebo --skip-optifuzz"
 
 # Build FastDyn
-RUN /bin/bash -c "source fastdyn-env/bin/activate && make PROBE=true DEV=true LIBHW=true LIBGZ=true FLIGHT_CONTROLLERS=true DEBUG_PRINT=true LIBFUZZ=true"
+RUN /bin/bash -c "source fastdyn-env/bin/activate && make PROBE=true DEV=true LIBHW=true LIBGZ=true FLIGHT_CONTROLLERS=true DEBUG_PRINT=true LIBFUZZ=false"
 
 # Automatically activate the virtual environment for interactive shells
 # Also add libhw to the library path so the fastdyn plugin can find it
