@@ -107,8 +107,8 @@ machine = "cortexm"
 cpu = "cortex-m7"
 plugin_library = "build/libfastdyn.so"
 monitor_elf = "../qemu/ws/monitor.elf"
-binary = "${CUBS2_FASTDYN_BUILD_DIR:-../cerebri_cubs2/build-mr_vmu_tropic-fastdyn}/zephyr/zephyr.elf"
-symbol_file = "${CUBS2_FASTDYN_BUILD_DIR:-../cerebri_cubs2/build-mr_vmu_tropic-fastdyn}/zephyr/zephyr.elf"
+binary = "/workspace/zephyr.elf"
+symbol_file = "/workspace/zephyr.elf"
 init_nsvtor = "0x70002000"
 twintrace = "None"
 hardware_trace = "hardware_log/io.log"
@@ -534,6 +534,6 @@ terminate_run_on_exit = true
 
 [Run.processes.cerebri_cubs2_fmi3.env]
 CUBS2_FASTDYN_SHARED_MEMORY = "${FASTDYN_WORK_DIR}/memory/machine0_main_ocram2.bin"
-CUBS2_FASTDYN_FIRMWARE_ELF = "${CUBS2_FASTDYN_BUILD_DIR:-../cerebri_cubs2/build-mr_vmu_tropic-fastdyn}/zephyr/zephyr.elf"
+CUBS2_FASTDYN_FIRMWARE_ELF = "/workspace/zephyr.elf"
 CUBS2_FASTDYN_STARTUP_TIMEOUT_S = "${CUBS2_FASTDYN_STARTUP_TIMEOUT_S:-60}"
 CUBS2_FASTDYN_RESPONSE_TIMEOUT_S = "${CUBS2_FASTDYN_RESPONSE_TIMEOUT_S:-30}"
