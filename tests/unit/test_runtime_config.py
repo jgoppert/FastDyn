@@ -191,31 +191,16 @@ def test_configure_run_environment_exports_repo_root(tmp_path, monkeypatch):
     assert env["FASTDYN_REPO_ROOT"] == str(tmp_path)
 
 
-def test_cerebri_config_launches_native_fmi3_bridge(tmp_path, monkeypatch):
-    repo_root = Path(__file__).resolve().parents[2]
-    config = repo_root / "configs" / "cerebri_cubs2_mr_vmu_tropic.toml"
-    cubs2_root = tmp_path / "cerebri_cubs2"
+def test_external_config_can_select_fastdyn_install_root(tmp_path, monkeypatch):
+    vehicle_root = tmp_path / "vehicle"
+    fastdyn_root = tmp_path / "fastdyn"
     work_dir = tmp_path / "work"
+    vehicle_root.mkdir()
+    fastdyn_root.mkdir()
     work_dir.mkdir()
-    monkeypatch.setenv("CEREBRI_CUBS2_ROOT", str(cubs2_root))
-    monkeypatch.setenv("FASTDYN_REPO_ROOT", str(repo_root))
+    config = write_config(vehicle_root / "fastdyn.toml", "")
+    monkeypatch.setenv("FASTDYN_INSTALL_ROOT", str(fastdyn_root))
 
-    runtime_config.configure_run_environment(config, work_dir)
-    processes = runtime_config.load_processes(config, repo_root=repo_root)
+    env = runtime_config.configure_run_environment(config, work_dir)
 
-    assert [process.name for process in processes] == ["cerebri_cubs2_fmi3"]
-    process = processes[0]
-    assert process.command[:4] == [
-        str(
-            repo_root
-            / "utils"
-            / "cerebri_cubs2_fmi3_bridge"
-            / "target"
-            / "release"
-            / "cerebri-cubs2-fmi3-bridge"
-        ),
-        "--launch",
-        "--cubs2-root",
-        str(cubs2_root),
-    ]
-    assert process.terminate_run_on_exit is True
+    assert env["FASTDYN_REPO_ROOT"] == str(fastdyn_root)

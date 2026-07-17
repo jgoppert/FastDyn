@@ -44,9 +44,9 @@ Reusable Modelica dynamics live in the `modelica_models` submodule:
 
 - `LieGroup/`: quaternion and SO(3) helpers.
 - `RigidBody/`: shared rigid-body dynamics.
-- `RigidBody/Examples/QuadrotorSIL.mo`
+- `Vehicles/Templates/QuadrotorPlant.mo`
 - `RigidBody/Examples/RoverPlant.mo`
-- `RigidBody/Examples/FixedWingPlant.mo`
+- `Vehicles/Templates/FixedWingPlant.mo`
 
 Vehicle-specific Modelica wrappers live in `modelica/FastDyn`. Those
 wrappers add the ArduPilot-facing sensor and actuator variables, including the

@@ -20,7 +20,15 @@ fastdyn run -c configs/copter462.toml
 
 ## Path And Environment Expansion
 
-Relative paths are resolved from the FastDyn repository root. Runtime helper
+Configuration files do not need to live in the FastDyn repository. This lets a
+firmware or vehicle repository own its board image, overlays, helper process,
+and acceptance criteria while reusing a separately installed FastDyn runtime.
+Set `FASTDYN_INSTALL_ROOT` when such an external configuration uses FastDyn-
+relative runtime process paths. FastDyn exports the selected directory to
+helpers as `FASTDYN_REPO_ROOT`; if the setting is absent, the Git repository
+containing the configuration is used.
+
+Relative FastDyn paths are resolved from that runtime root. Runtime helper
 strings support `${NAME:-default}` expansion, so a config can provide defaults
 while `fastdyn swarm` injects per-worker ports:
 
@@ -32,6 +40,9 @@ Important injected environment variables are:
 
 - `FASTDYN_WORK_DIR`: current run work directory.
 - `FASTDYN_CONFIG`: absolute config path.
+- `FASTDYN_INSTALL_ROOT`: optional FastDyn runtime checkout for an externally
+  owned configuration.
+- `FASTDYN_REPO_ROOT`: resolved runtime root passed to helper processes.
 - `FASTDYN_MONITOR_PORT`: QEMU monitor TCP port.
 - `FASTDYN_MAVLINK_FIRMWARE_PORT`: firmware-facing MAVLink UDP port.
 - `FASTDYN_MAVLINK_GCS_PORT`: GCS/helper-facing MAVLink UDP port.

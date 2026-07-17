@@ -36,6 +36,13 @@ class RuntimeConfigError(RuntimeError):
     pass
 
 
+def _runtime_root(config_path: str | Path) -> Path:
+    install_root = os.environ.get("FASTDYN_INSTALL_ROOT")
+    if install_root:
+        return Path(install_root).expanduser().resolve()
+    return fmu_build.find_repo_root(Path(config_path))
+
+
 def _expand_value(value: object, env: dict[str, str]) -> object:
     if isinstance(value, str):
         return expand_env_defaults(value, env)
@@ -455,7 +462,7 @@ def configure_run_environment(config_path: str | Path, work_dir: str | Path) -> 
 
     env = {
         "FASTDYN_CONFIG": str(config_path),
-        "FASTDYN_REPO_ROOT": str(fmu_build.find_repo_root(config_path)),
+        "FASTDYN_REPO_ROOT": str(_runtime_root(config_path)),
         "FASTDYN_WORK_DIR": str(work_dir_path),
         **_profiling_env(run_table, work_dir_path),
     }
@@ -471,7 +478,7 @@ def configure_run_environment(config_path: str | Path, work_dir: str | Path) -> 
 
 def load_processes(config_path: str | Path, repo_root: Path | None = None) -> list[RuntimeProcess]:
     config_path = Path(config_path).expanduser().resolve()
-    repo_root = repo_root or fmu_build.find_repo_root(config_path)
+    repo_root = repo_root or _runtime_root(config_path)
     data = _load_toml(config_path)
 
     processes: list[RuntimeProcess] = []
@@ -515,7 +522,7 @@ class RuntimeProcessManager:
         env.update(
             {
                 "FASTDYN_CONFIG": str(self.config_path),
-                "FASTDYN_REPO_ROOT": str(fmu_build.find_repo_root(self.config_path)),
+                "FASTDYN_REPO_ROOT": str(_runtime_root(self.config_path)),
                 "FASTDYN_WORK_DIR": str(self.work_dir),
                 "FASTDYN_TIMING_FILE": str(self.work_dir / "fastdyn_timing.jsonl"),
                 "FASTDYN_TIMING_PROCESS": process.name,

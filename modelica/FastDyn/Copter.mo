@@ -14,7 +14,7 @@ model Copter
   parameter Real tau_up = 0.0125 "Motor spin-up time constant [s]";
   parameter Real tau_down = 0.025 "Motor spin-down time constant [s]";
 
-  RigidBody.Examples.QuadrotorSIL plant(
+  Vehicles.Templates.QuadrotorPlant plant(
     ground_z = 0.0,
     vehicle_mass = mass,
     vehicle_ixx = ixx,

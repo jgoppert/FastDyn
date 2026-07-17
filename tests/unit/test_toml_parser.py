@@ -5,19 +5,19 @@ from fastdyn.toml_parser import _load_svd_enabled
 
 
 def test_config_expands_environment_defaults(monkeypatch):
-    monkeypatch.delenv("CEREBRI_CUBS2_ROOT", raising=False)
+    monkeypatch.delenv("VEHICLE_ROOT", raising=False)
     loaded = expand_env_defaults(
-        {"CPU": {"cpu0": [{"binary": "${CEREBRI_CUBS2_ROOT:-../cerebri_cubs2}/zephyr.elf"}]}}
+        {"CPU": {"cpu0": [{"binary": "${VEHICLE_ROOT:-../vehicle}/zephyr.elf"}]}}
     )
 
-    assert loaded["CPU"]["cpu0"][0]["binary"] == "../cerebri_cubs2/zephyr.elf"
+    assert loaded["CPU"]["cpu0"][0]["binary"] == "../vehicle/zephyr.elf"
 
 
 def test_config_prefers_environment_override(monkeypatch):
-    monkeypatch.setenv("CEREBRI_CUBS2_ROOT", "/workspace/cubs2")
+    monkeypatch.setenv("VEHICLE_ROOT", "/workspace/vehicle")
     assert (
-        expand_env_defaults("${CEREBRI_CUBS2_ROOT:-../cerebri_cubs2}/src")
-        == "/workspace/cubs2/src"
+        expand_env_defaults("${VEHICLE_ROOT:-../vehicle}/src")
+        == "/workspace/vehicle/src"
     )
 
 
