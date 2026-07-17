@@ -108,6 +108,7 @@ Build it with:
   ../configure \
     --target-list=arm-softmmu \
     --enable-plugins \
+    --disable-curl \
     --disable-docs \
     --disable-sdl
   make qemu-system-arm
@@ -120,7 +121,7 @@ fastdyn_setup_qemu_build() {
   local qemu_repo="$3"
   local qemu_ref="$4"
   local qemu_bin="$qemu_root/build/qemu-system-arm"
-  local qemu_config_stamp="$qemu_root/build/.fastdyn-headless-config-v1"
+  local qemu_config_stamp="$qemu_root/build/.fastdyn-headless-config-v2"
 
   if [[ -x "$qemu_bin" && -f "$qemu_config_stamp" && -d "$qemu_root/.git" ]]; then
     if fastdyn_setup_qemu_patch "$repo_root" "$qemu_root"; then
@@ -154,6 +155,7 @@ fastdyn_setup_qemu_build() {
     (cd "$qemu_root/build" && ../configure \
       --target-list=arm-softmmu \
       --enable-plugins \
+      --disable-curl \
       --disable-docs \
       --disable-sdl) || return
     touch "$qemu_config_stamp" || return

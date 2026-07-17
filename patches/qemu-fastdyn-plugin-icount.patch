@@ -90,6 +90,17 @@ index f285fcf53f..9f78d24395 100644
  }
  
  extern void raise_irq(CPUState *cs, int irq_num, int secure);
+diff --git a/plugins/core.c b/plugins/core.c
+--- a/plugins/core.c
++++ b/plugins/core.c
+@@ -398,6 +398,6 @@ void plugin_register_dyn_cb__udata(GArray **arr,
+     struct qemu_plugin_dyn_cb *dyn_cb = plugin_get_dyn_cb(arr);
+     struct qemu_plugin_regular_cb regular_cb = { .f.vcpu_udata = cb,
+-												 .rw = flags,
++												 .rw = (enum qemu_plugin_mem_rw)flags,
+                                                  .userp = udata,
+                                                  .info = &info[flags & (~(QEMU_PLUGIN_CB_RW_CFI))] };
+     dyn_cb->type = PLUGIN_CB_REGULAR;
 diff --git a/target/arm/tcg/m_helper.c b/target/arm/tcg/m_helper.c
 index 3dcd0b41ba..f69f797531 100644
 --- a/target/arm/tcg/m_helper.c
