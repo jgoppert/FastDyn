@@ -535,6 +535,9 @@ fastdyn_setup_main() {
     return 1
   fi
 
+  local host_ninja=""
+  host_ninja="$(command -v ninja 2>/dev/null || true)"
+
   "$python_bin" -m venv "$venv_path" || return
 
   local venv_python="$venv_path/bin/python"
@@ -549,6 +552,11 @@ fastdyn_setup_main() {
 
   "$venv_python" -m pip install -r "$repo_root/requirements.txt" || return
   "$venv_python" -m pip install -e "$repo_root/src" || return
+  if [[ -n "$host_ninja" && -x "$venv_path/bin/ninja" ]] &&
+     ! "$venv_path/bin/ninja" --version >/dev/null 2>&1; then
+    ln -sf "$host_ninja" "$venv_path/bin/ninja" || return
+    echo "Using host Ninja because the Python wheel is not executable on this system: $host_ninja"
+  fi
   export PATH="$venv_path/bin:$PATH"
 
   if [[ "$update_submodules" == "true" ]]; then
