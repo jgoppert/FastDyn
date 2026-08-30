@@ -4,6 +4,7 @@
 #include <qemu/qemu-plugin.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "common.h"
 
 /**
  * @brief Get the current program counter (PC) value.
@@ -49,4 +50,16 @@ void core_register_tb_trans_hook(core_tb_trans_hook_t cb);
 
 // Allow users to register a hook for when fastdyn exits
 void core_register_exit_hook(void (*cb)(void));
+
+/* Rules and updates constructed programmatically by virtual subsystems. */
+bool core_register_virtual_rule(uint64_t address, cb_func_t func,
+                                const char *args);
+bool core_register_register_update(uint64_t address, int reg,
+                                   uint64_t value);
+
+/* Register a normal modifier whose generated update runs only while
+ * ``enabled`` is non-zero. The gate is read at guest runtime, so it can be
+ * changed after the target basic block has been translated. */
+bool core_register_gated_modifier(uint64_t address, const char *patch,
+                                  const volatile uint8_t *enabled);
 #endif /* CORE_H */

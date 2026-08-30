@@ -191,6 +191,8 @@ int parse_update_line(const char *line, UpdateEntry *entry) {
     char *token;
     char *endptr;
 
+    entry->enabled = NULL;
+
     strncpy(buf, line, sizeof(buf));
     buf[sizeof(buf) - 1] = '\0'; // Ensure null termination
 
@@ -953,6 +955,67 @@ bool find_rule_by_address(unsigned long long addr, rule_t **out_rule) {
         }
     }
     return false;
+}
+
+bool core_register_virtual_rule(uint64_t address, cb_func_t func,
+                                const char *args)
+{
+    if (func == NULL || rules_count >= MAX_RULES) {
+        return false;
+    }
+
+    rules[rules_count].address = address;
+    rules[rules_count].func = func;
+    if (args != NULL) {
+        strncpy(rules[rules_count].args, args,
+                sizeof(rules[rules_count].args) - 1U);
+        rules[rules_count].args[sizeof(rules[rules_count].args) - 1U] = '\0';
+    } else {
+        rules[rules_count].args[0] = '\0';
+    }
+    rules_count++;
+    return true;
+}
+
+bool core_register_register_update(uint64_t address, int reg, uint64_t value)
+{
+    UpdateEntry *entry;
+
+    if (reg < 0 || update_entry_count >= MAX_ENTRIES) {
+        return false;
+    }
+
+    entry = &update_entries[update_entry_count++];
+    entry->update_point = (unsigned long)address;
+    entry->type = TARGET_REGISTER;
+    entry->target.reg_num = reg;
+    entry->value_type = VALUE_IMMEDIATE;
+    entry->value.imm = (unsigned long)value;
+    entry->enabled = NULL;
+    return true;
+}
+
+bool core_register_gated_modifier(uint64_t address, const char *patch,
+                                  const volatile uint8_t *enabled)
+{
+    char line[MAX_LINE_LEN];
+    UpdateEntry entry = {0};
+    int written;
+
+    if (patch == NULL || enabled == NULL || update_entry_count >= MAX_ENTRIES) {
+        return false;
+    }
+
+    written = snprintf(line, sizeof(line), "0x%llx %s",
+                       (unsigned long long)address, patch);
+    if (written < 0 || (size_t)written >= sizeof(line) ||
+        parse_update_line(line, &entry) != 0) {
+        return false;
+    }
+
+    entry.enabled = enabled;
+    update_entries[update_entry_count++] = entry;
+    return true;
 }
 
 static const char* safe_arg(const char* s) {

@@ -22,6 +22,9 @@ if ENABLE_AFLNET
     srcs += files('fuzz_aflnet.c')
 endif
 
+if ENABLE_LIBFUZZ
+    subdir('schema')
+endif
 subdir('protocol_fuzzers')
 subdir('stateful_fuzzers')
 

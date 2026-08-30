@@ -17,6 +17,10 @@ typedef struct {
 // gets fuzzed data into buf of max size len, returns copied size
 size_t fuzz_get_data(char* buf, size_t len);
 
+/* Take the current fuzz message exactly once. The caller owns *data and must
+ * free it. Unlike fuzz_get_data(), this preserves the message's true size. */
+bool fuzz_take_input(uint8_t **data, size_t *len);
+
 // sets data that should be returned to fuzzer
 void fuzz_set_data(char* buf, size_t len);
 

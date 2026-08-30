@@ -23,6 +23,7 @@
 #include "cov_trace.h"
 
 #include "protocol_fuzzers/protocol_fuzzers.h"
+#include "schema/schema.h"
 #include "stateful_fuzzers/stateful_fuzzers.h"
 
 static int coverage = 0;
@@ -210,13 +211,17 @@ static void fuzz_activate_message(const fuzz_backend_msg_t *msg)
     atomic_store_explicit(&g_active_msg_state, FUZZ_MSG_READY, memory_order_release);
 }
 
-size_t fuzz_get_data(char* buf, size_t len)
+bool fuzz_take_input(uint8_t **data, size_t *len)
 {
     int expected = FUZZ_MSG_READY;
+    uint8_t *copy;
+    size_t copy_len;
 
-    if (buf == NULL || len == 0) {
-        return 0;
+    if (data == NULL || len == NULL) {
+        return false;
     }
+    *data = NULL;
+    *len = 0;
 
     // essentially an atomic 'if (g_active_msg_state == expected) {g_active_msg_state = FUZZ_MSG_CONSUMING} else return 0'
     if (!atomic_compare_exchange_strong_explicit(
@@ -225,19 +230,47 @@ size_t fuzz_get_data(char* buf, size_t len)
             FUZZ_MSG_CONSUMING,
             memory_order_acq_rel,
             memory_order_acquire)) {
-        return 0;
+        return false;
     }
 
-    size_t copy_len = g_active_msg_len < len ? g_active_msg_len : len;
+    copy_len = g_active_msg_len;
     if (copy_len != 0 && g_active_msg_data == NULL) {
-        copy_len = 0;
+        atomic_store_explicit(&g_active_msg_state, FUZZ_MSG_READY,
+                              memory_order_release);
+        return false;
     }
 
+    copy = malloc(copy_len == 0 ? 1U : copy_len);
+    if (copy == NULL) {
+        atomic_store_explicit(&g_active_msg_state, FUZZ_MSG_READY,
+                              memory_order_release);
+        return false;
+    }
     if (copy_len != 0) {
-        memcpy(buf, g_active_msg_data, copy_len);
+        memcpy(copy, g_active_msg_data, copy_len);
     }
 
     atomic_store_explicit(&g_active_msg_state, FUZZ_MSG_CONSUMED, memory_order_release);
+    *data = copy;
+    *len = copy_len;
+    return true;
+}
+
+size_t fuzz_get_data(char* buf, size_t len)
+{
+    uint8_t *data;
+    size_t data_len;
+    size_t copy_len;
+
+    if (buf == NULL || len == 0 || !fuzz_take_input(&data, &data_len)) {
+        return 0;
+    }
+
+    copy_len = data_len < len ? data_len : len;
+    if (copy_len != 0) {
+        memcpy(buf, data, copy_len);
+    }
+    free(data);
     return copy_len;
 }
 
@@ -815,6 +848,8 @@ static void fuzz_snap_point(unsigned int cpu_index, void *udata)
         if (g_fuzz_snapshot.loaded_from_file && !fuzz_restore_snapshot()) {
             utils_die("[sync] Failed to restore loaded snapshot");
         }
+
+        schema_activate_post_snapshot_modifiers();
 
         observed_clear();
 

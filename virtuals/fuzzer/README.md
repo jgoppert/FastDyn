@@ -67,7 +67,7 @@ Currently this supports libAFL
 
 ### Fuzzing Virtuals
 
-The generic loop uses three virtual instructions:
+The generic loop uses three lifecycle points:
 
 - `fuzz_state_point` some firmware may have a long startup or a difficult to
   reach fuzzing target. In these cases, the state point is meant to be a
@@ -83,46 +83,45 @@ The generic loop uses three virtual instructions:
   iteration.
 
 Choose a snap point immediately before the code that consumes the fuzzed data,
-and a sync point after that code has completed. Redirect execution from the
-sync point back to the snap point with a modifier. The redirected instruction
-must be safe to skip; function epilogues are a common choice when the modifier
-updates `r15` before the epilogue executes.
+and a sync point after that code has completed. Put those points in the schema
+`flow` object. `sync.resume` redirects execution for the next iteration; the
+redirected instruction must be safe to skip. Function epilogues are a common
+choice when the redirect updates `r15` before the epilogue executes.
 
 ```toml
 [Machine]
 coverage = true
 fuzzing = true
 fuzzing_schema = "path/to/schema.json"
+```
 
-[[CPU.cpu0.virtuals]]
-at = "0x08001000"
-instruction = "fuzz_state_point"
-args = []
-
-[[CPU.cpu0.virtuals]]
-at = "0x08002000"
-instruction = "fuzz_snap_point"
-args = []
-
-[[CPU.cpu0.virtuals]]
-at = "0x08002080"
-instruction = "fuzz_sync_point"
-args = []
-
-[[CPU.cpu0.modifiers]]
-at = "0x08002080"
-patch = "r15 0x08002000"
+```json
+{
+  "flow": {
+    "state": { "at": "0x08001000" },
+    "snap":  { "at": "0x08002000" },
+    "sync":  { "at": "0x08002080", "resume": "0x08002000" }
+  },
+  "fields": []
+}
 ```
 
 The state point is normally reached once. The snap and sync points then form
-the persistent loop: **snap → inject → target code → sync → snap**.
+the persistent loop: **snap → inject → target code → sync → snap**. A schema
+without `flow` remains compatible with the existing TOML virtuals and
+modifiers, which is useful while migrating a target.
 
 ### Schema
 
-`fuzzing_schema` names a JSON file with one top-level `fields` array. Each
-field has exactly four properties: `name`, `location`, `type`, and `size`.
-Fields consume input in array order, so the total requested fuzz input is the
-sum of their sizes.
+`fuzzing_schema` names a JSON object. Its independent top-level sections are
+`flow`, `fields`, `streams`, and `hooks`. `flow` owns the state/snap/sync
+lifecycle; `hooks` owns non-snap injection events. Each field requires `name`,
+`type`, and `size`; `location` is optional. A locationless field is delivered
+by a stream. Types may also define an optional `options` object. Each type
+reports how many fuzz-input bytes it expects. Direct fields reserve those bytes
+in array order; stream-only fields reserve from the shared stream suffix when
+first emitted. For `int`,
+`uint`, `float`, and `data`, the expectation is `size` bytes.
 
 ```json
 {
@@ -130,26 +129,118 @@ sum of their sizes.
     {
       "name": "message",
       "location": "r2",
-      "type": "random",
+      "type": "data",
       "size": 291
     },
     {
       "name": "mode",
       "location": "reg(0)",
-      "type": "random",
+      "type": "uint",
       "size": 4
     }
   ]
 }
 ```
 
-`random` is the only type currently supported. It copies the field's next
-`size` bytes from the fuzz input to its resolved `location`, which can be
-an expression, detailed blow.
+The supported types are `int`, `uint`, `float`, `data`, `length`, and
+`checksum`:
 
-Locations are evaluated once, when the schema is first loaded at the snapshot
+| Type | Meaning |
+| --- | --- |
+| `int` | Signed integer represented by `size` fuzzed bytes. |
+| `uint` | Unsigned integer represented by `size` fuzzed bytes. |
+| `float` | Floating-point value represented by `size` fuzzed bytes. |
+| `data` | Byte array of `size` fuzzed bytes. |
+| `length` | Encodes the combined size of named fields. It is computed by default and can optionally be fuzzed. |
+| `checksum` | A computed checksum over named fields and/or bytes already emitted by named streams. |
+
+The first four types copy their next `size` input bytes unchanged. Direct
+fields write those bytes to their resolved location; streams emit them one at a
+time. Their distinction is retained in the loaded schema for type-aware
+analysis; no host-endian conversion or numeric normalization is performed by
+the generic writer.
+
+`int`, `uint`, `float`, and `data` also accept `options.constant`. A constant
+does not consume fuzz input, which makes it particularly useful for stream
+headers and fixed protocol values. Integer constants are JSON numbers encoded
+little-endian into `size` bytes; signed constants are sign-extended. Float
+constants are JSON numbers encoded as IEEE-754 binary16, binary32, or binary64
+when `size` is 2, 4, or 8 respectively. A `data` constant is an exact array of
+`size` byte values:
+
+```json
+{
+  "fields": [
+    { "name": "preamble", "type": "uint", "size": 1,
+      "options": { "constant": 255 } },
+    { "name": "message_id", "type": "uint", "size": 2,
+      "options": { "constant": 1 } },
+    { "name": "magic", "type": "data", "size": 2,
+      "options": { "constant": [255, 71] } }
+  ]
+}
+```
+
+A `length` field requires `fields` and `byte_order` in `options`. `fields` is
+an array of names whose declared output sizes are added together. A `length`
+field can name defined fields and/or finite streams. An unbounded raw stream
+cannot be used because it has no known length. `byte_order` is either
+`"little"` or `"big"`. The optional
+boolean `fuzzable` defaults to `false`:
+
+```json
+{
+  "name": "payload_length",
+  "location": "r2 + 4",
+  "type": "length",
+  "size": 2,
+  "options": {
+    "fields": ["header", "payload"],
+    "byte_order": "little",
+    "fuzzable": true
+  }
+}
+```
+
+With `fuzzable: false`, `length` consumes no fuzz input and always writes the
+computed value. With `fuzzable: true`, it always consumes `size + 1` bytes:
+the first byte selects the behavior, and the remaining `size` bytes reserve
+the fuzzed value. A selector below `128` writes the fuzzed value; a selector
+of `128` or greater discards those reserved bytes and writes the computed
+value instead. Reserving the bytes in both cases keeps the input layout stable.
+
+`checksum` supports the standard `crc16-modbus` and `crc16-mcrf4xx`
+algorithms. `crc16-mcrf4xx` is MAVLink's CRC accumulator: it starts at
+`0xffff` and has no final XOR. It has a fixed `size` of two bytes and consumes
+no fuzz input. Its `over` array is an ordered list of field or stream names;
+fields contribute their generated bytes and a stream contributes the bytes it
+has already emitted in this iteration. `byte_order` controls the two emitted
+checksum bytes. MAVLink's dialect-specific `CRC_EXTRA` must be included among
+the covered bytes separately when constructing a complete MAVLink frame.
+
+```json
+{
+  "name": "frame_crc",
+  "location": "r3",
+  "type": "checksum",
+  "size": 2,
+  "options": {
+    "algorithm": "crc16-modbus",
+    "over": ["header", "payload", "uart_rx"],
+    "byte_order": "little"
+  }
+}
+```
+
+The checksum is calculated from exactly the ordered bytes named in `over`; it
+does not reread mutable guest memory. A stream reference can therefore only
+cover bytes emitted before the checksum itself is generated.
+
+Field locations are evaluated once, when the schema first reaches the snapshot
 point. This intentionally freezes register-derived addresses and pointer
-chains for the campaign.
+chains for the campaign. Stream locations use the same grammar but are
+evaluated at each delivery hook, allowing a stream to target a current output
+pointer such as `r1` inside a receive loop.
 
 | Location | Meaning |
 | --- | --- |
@@ -171,7 +262,7 @@ the following resolves a three-step object chain before the bytes are written:
 {
   "name": "payload",
   "location": "[[[r4 + 0x14] + 0x8] + 0x20]",
-  "type": "random",
+  "type": "data",
   "size": 64
 }
 ```
@@ -179,3 +270,69 @@ the following resolves a three-step object chain before the bytes are written:
 Here the parser reads a pointer from `r4 + 0x14`, follows a second pointer at
 offset `0x8`, then follows a third pointer at offset `0x20`. Use parentheses
 when they make a more complex arithmetic expression clearer.
+
+#### Hooks and streams
+
+Fields not named by a hook are written at `flow.snap`. A field named by one
+`inject` hook is written when that hook executes instead; a normal field is
+written only once per iteration even if its instruction is revisited.
+
+Streams model input that is consumed one byte at a time, such as a UART receive
+routine. A stream has a destination `location`, while its hook says when to
+deliver its next byte. Fixed fields keep their deterministic input prefix; the
+stream consumes one byte at a time from the true, unreserved suffix of the
+fuzzer input. Multiple stream deliveries share that suffix in execution order.
+After the suffix is exhausted, the stream writes a zero byte (an explicit EOF
+policy can be added later without changing locations).
+
+A stream without `fields` remains an unbounded raw stream. A stream with
+`fields` emits one finite sequence of named field definitions, then zero
+padding. This is useful for a single framed message: raw fields consume fuzz
+input, while derived fields such as `checksum` consume none and can refer to
+the stream's preceding output.
+
+```json
+{
+  "fields": [
+    { "name": "frame", "type": "data", "size": 21 },
+    {
+      "name": "crc", "type": "checksum", "size": 2,
+      "options": {
+        "algorithm": "crc16-modbus",
+        "over": ["uart_rx"],
+        "byte_order": "little"
+      }
+    }
+  ],
+  "streams": [
+    { "name": "uart_rx", "location": "r1",
+      "fields": ["frame", "crc"] }
+  ]
+}
+```
+
+Here `uart_rx` emits 21 fuzzed bytes followed by the CRC-16/MODBUS of those
+21 bytes. The stream history is reset at the beginning of every fuzz iteration.
+
+```json
+{
+  "flow": {
+    "snap": { "at": "0x08002000" },
+    "sync": { "at": "0x08002080", "resume": "0x08002000" }
+  },
+  "fields": [
+    { "name": "mode", "location": "reg(0)", "type": "uint", "size": 1 }
+  ],
+  "streams": [
+    { "name": "uart_rx", "location": "reg(1)" }
+  ],
+  "hooks": [
+    { "at": "0x08002110", "fields": ["uart_rx"] }
+  ]
+}
+```
+
+In this example `mode` is injected at snap, then every visit to `0x08002110`
+places the next stream byte in `r1`. The `fields` name in a hook is retained
+for one uniform list: it can contain either ordinary field names or stream
+names.

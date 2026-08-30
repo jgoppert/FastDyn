@@ -169,6 +169,10 @@ typedef struct {
         unsigned long imm; // VALUE_IMMEDIATE
         int reg_num;       // VALUE_REGISTER and VALUE_DEREF (source register)
     } value;
+
+    /* NULL means unconditional. Otherwise the update is emitted only when
+       the pointed-to byte is non-zero at guest runtime. */
+    const volatile uint8_t *enabled;
 } UpdateEntry;
 
 typedef struct {

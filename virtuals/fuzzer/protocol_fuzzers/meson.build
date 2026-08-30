@@ -4,6 +4,5 @@ if ENABLE_LIBFUZZ
         'packetreceived.c',
         'lwip_http_fuzzer.c',
         'mqtt.c',
-        'generic.c',
     )
 endif
