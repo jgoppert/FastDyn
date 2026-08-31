@@ -1,21 +1,21 @@
-# FastDyn CLI and Automatic Rehosting Integration Guide
+# FastDyn Rehosting and Fuzzing Integration Guide
 
 *FIRE FastDyn | STR Integration Documentation | Main branch (As-of-date 30 Aug 2026)*
 
-**Purpose.** This guide documents the current command-line integration path for FastDyn, with emphasis on the information STR requires for tool integration: the CLI entry points and parameters, the multi-stage automatic rehosting pipeline (currently: static analysis → probe run → trace analysis → LLM), the on-disk artifacts produced at each stage, the container build/run procedure, and FastDyn's role in the FIRE multi-fidelity workflow. The scope covered here is **LLM-driven, driver-source-only rehosting without any hardware trace**: given a firmware ELF, the firmware's driver source tree, and a machine description (SVD + TOML), FastDyn iteratively discovers and generates peripheral device models until the firmware achieves the required functionality and is fully rehosted.
+**Purpose.** This guide documents FastDyn's integration path for automatic rehosting and schema-driven fuzzing. It covers the CLI entry points and parameters, the multi-stage rehosting pipeline (currently: static analysis → probe run → trace analysis → LLM), the artifacts produced at each stage, the container build/run procedure, and FastDyn's role in the FIRE multi-fidelity workflow. Given a firmware ELF, its driver source tree, and a machine description (SVD + TOML), FastDyn can iteratively generate peripheral device models until the firmware reaches the required functionality. Once an input-processing path is rehosted, a JSON fuzzing schema can describe that path without a target-specific C harness, allowing the same rehosted firmware to be fuzzed.
 
 | STR requested information | Covered in |
 |---|---|
 | CLI parameters and usage | Section 1: `fastdyn` entry point, subcommand reference, invocation examples. |
-| How the tool consumes models and firmware inputs | Section 2: static-analysis cache, `boardrunner_sdk` model layout, TOML `[Device.*]` conventions. |
-| Workflow / integration example | Section 3: four-stage loop with concrete artifact hand-offs; Section 5 walk-through. |
-| FIRE toolchain relationship | Section 4: FastDyn as the firmware-hosted Hi-Fi confirmation layer downstream of Rumoca / CP-Reach / CP-Glimpse. |
+| How the tool consumes models, firmware, and fuzzing inputs | Section 2: static-analysis cache, `boardrunner_sdk` model layout, TOML conventions, and fuzzing schema. |
+| Workflow / integration example | Section 3: rehosting loop plus schema examples; Section 5 walk-through. |
+| FIRE toolchain relationship | Section 4: rehosting and schema-driven fuzzing integration. |
 | Docker build and smoke test | Section 5: container build, verification steps, expected artifacts, integration checklist. |
 | IP-sensitivity of LLM prompts | Section 6: transparent account of what firmware content is sent to the LLM. |
 
 > **Architecture status note.** FastDyn's LLM-driven rehost stage is under active development. The user-facing contract this document intends to keep stable is the **CLI-driven pipeline shape** (a small set of subcommands invoked from a container, driven by a single TOML per firmware, producing artifacts under a work directory) rather than the exact command names or stage boundaries. The **TOML configuration schema**, the **Docker build recipe**, the **static-analysis cache format**, and the **artifact categories listed in §5.4** are intended to remain consistent. The current pipeline exposes four subcommands (`static-analyze`, `probe-run`, `trace-analyze`, `llm`); future revisions may consolidate or rename stages — in particular, `trace-analyze` and `llm` may merge into a single execution step. Integration automation should pin a tested FastDyn revision and expect that command names, `llm`-side flags, and internal artifact files may change between revisions.
 
-## Integration workflow at a glance
+## Automatic-rehosting workflow at a glance
 
 ```mermaid
 flowchart TD
@@ -41,9 +41,9 @@ flowchart TD
     models -.->|"next iteration"| pr
 ```
 
-Each iteration of this loop either advances the firmware past a previously unhandled MMIO access, refines a peripheral model that returned wrong values, or emits a routing decision when the LLM determines that a different peripheral is at fault. The loop terminates when the firmware reaches a user-specified milestone (control loop, arming, first sensor read, etc.) without further MMIO faults.
+Each iteration of this loop either advances the firmware past a previously unhandled MMIO access, refines a peripheral model that returned wrong values, or emits a routing decision when the LLM determines that a different peripheral is at fault. The loop terminates when the firmware reaches a user-specified milestone (control loop, arming, first sensor read, etc.) without further MMIO faults. Schema-driven fuzzing is a subsequent activity.
 
-> **Scope note.** This document intentionally omits the hardware-trace (`twintrace`) record/replay flow and the `LIBHW=true` physical-hardware backend. Both are supported by the same CLI but are out of scope for automatic LLM-driven rehosting. The subcommand reference below flags the options that belong to those flows as *(hardware-mode; not used here)*.
+> **Scope note.** The automatic-rehosting portion of this document omits the hardware-trace (`twintrace`) record/replay flow and the `LIBHW=true` physical-hardware backend. The schema-driven fuzzer described here operates on rehosted firmware and does not require a hardware trace. The subcommand reference below flags options belonging to hardware-mode flows as *(hardware-mode; not used here)*.
 
 ## 1. CLI Interface
 
@@ -62,9 +62,9 @@ fastdyn llm           --help
 
 FastDyn is driven by a single TOML per firmware/board pair (typically under `configs/`). The TOML defines the QEMU machine, memory backing, ELF path, plugin options, and the peripheral model routing table. Command-line flags are intentionally minimal; most behavior comes from the TOML so that the same configuration can be reused across `probe-run`, `trace-analyze`, and rerun automation.
 
-### 1.1 Automatic-rehosting subcommands
+### 1.1 Automatic-rehosting and fuzzing subcommands
 
-The pipeline subcommands share the `-c/--config` flag and read from the same TOML. Output directories default to sensible sibling paths and can be overridden via `-o/--work-dir`. The flag tables below list the primary, stable options for each subcommand; additional tuning flags are exposed by each subcommand's `--help` and are part of the current execution model that may evolve.
+The primary rehosting and fuzzing commands share the `-c/--config` flag and read from the same TOML. Output directories default to sensible sibling paths and can be overridden via `-o/--work-dir`. The flag tables below list the primary, stable options for each command; additional tuning flags are exposed by each subcommand's `--help` and are part of the current execution model that may evolve.
 
 #### 1.1.1 `fastdyn static-analyze`
 
@@ -133,6 +133,19 @@ Additional flags controlling sampling temperature, reasoning-effort, retry behav
 
 The `llm` subcommand accepts prompts produced by `trace-analyze` and writes patches, new files, or routing decisions back into the work directory. The set of response types and the iteration control mechanism are implementation details of the current execution model and may change in future revisions; the CLI shape and I/O contract remain stable.
 
+#### 1.1.5 `fastdyn run` for schema-driven fuzzing
+
+Runs the firmware in QEMU using the selected TOML. For a fuzzing campaign, the
+TOML must enable `fuzzing` and `coverage` and provide `fuzzing_schema` in its
+`[Machine]` section.
+
+| Flag | Type / Default | Purpose |
+|---|---|---|
+| `-c, --config` | path (required) | TOML configuration for the fuzzing target. |
+| `-o, --work-dir` | path (default: `./fastdyn_work`) | Campaign output directory, including corpus and coverage artifacts. |
+| `-p, --persist-work-dir` | flag | Preserve the existing work directory so a later campaign can reuse its corpus. |
+| `-s, --svd` | path (optional) | Override the SVD file or directory. |
+
 ### 1.2 Docker execution
 
 The repository includes a `Dockerfile` at the project root that produces a complete FastDyn environment (Ubuntu 24.04 base, patched QEMU, Ghidra 12.0.4, Gazebo Harmonic, Python venv, and the FastDyn plugin `libfastdyn.so`).
@@ -156,7 +169,6 @@ The image entrypoint drops into `/workspace/FastDyn` with the Python venv activa
 
 The following subcommands exist on the CLI and are documented here for completeness; they are not used by the automatic rehosting flow described in this guide:
 
-- `fastdyn run` — one-shot QEMU launch (no probe loop) once the firmware is fully rehosted.
 - `fastdyn loop` — wrapper around `run` with auto-restart on clean exit.
 - `fastdyn swarm` — parallel workers with per-worker port ranges.
 - `fastdyn verifier` — cross-check emulated behavior against a reference hardware log *(hardware-mode; not used here)*.
@@ -224,7 +236,110 @@ Each `[Device.<name>]` block in the TOML declares an MMIO range and points at on
 
 `probe-run` does not require the modeling directory to be complete before it starts. When the firmware performs an MMIO access to a range that is either not covered by any `[Device.*]` block or handled by a stub, the FastDyn plugin captures the fault. The next stages (`trace-analyze` → `llm`) either fill in a new model file, update an existing one, or emit a routing decision that renames / relocates the responsibility. Progress across iterations is tracked by counting basic-block coverage of the firmware image and by the milestone symbol list in `[Machine].milestones`.
 
-## 3. Combining Stages: End-to-End Rehosting Workflow
+### 2.5 Schema-driven fuzzing
+
+Once rehosting has made an input-processing path reliable, FastDyn can fuzz it
+without a target-specific C harness. A JSON fuzzing schema describes where a
+test case begins and ends, where its values are delivered, and which values
+are fuzzed, fixed, or computed. Enable the feature and name the schema in the
+target TOML:
+
+```toml
+[Machine]
+fuzzing = true
+coverage = true
+fuzzing_schema = "path/to/schema.json"
+```
+
+The main schema sections are `flow`, `fields`, `streams`, and `hooks`.
+
+#### 2.5.1 Fuzzing loop
+
+`flow` defines one repeatable test-case loop. **Snap** is immediately before
+the target consumes input: FastDyn restores the snapshot, obtains a fresh
+fuzzer input, and injects ordinary fields. **Sync** is after that input has
+been processed; its `resume` address restarts execution for the next test
+case, and should be directed to the address of snap. Often times there are
+multiple points at which an input handler can exit, and multiple sync points
+are required.
+
+```json
+"flow": {
+  "snap": { "at": "0x08002000" },
+  "sync": { "at": "0x08002080", "resume": "0x08002000" }
+}
+```
+
+#### 2.5.2 Fields, locations, and types
+
+Each field has a unique `name`, a `type`, and an output `size` in bytes. A
+field with a `location` is written directly to the target; a locationless
+field is delivered through a stream.
+
+```json
+{ "name": "message_id", "location": "r2 + 4", "type": "uint", "size": 2 }
+```
+
+Except for `reg(N)`, a location is a memory-address expression. It can use
+register values, arithmetic, and pointer dereferences.
+
+| Location | Meaning |
+|---|---|
+| `reg(1)` | Write directly to register `r1`. |
+| `0x20001000` | Write to an absolute memory address. |
+| `r2` | Use the value in `r2` as the destination address. |
+| `r2 + 0x10` | Write at an offset from the address in `r2`. |
+| `[r3]` | Follow a pointer stored at `r3`. |
+| `u16[r3 + 6]` | Read a 16-bit unsigned address from memory. |
+
+The basic types are `int`, `uint`, `float`, and `data`; by default each uses
+fuzzed bytes of the requested size. `data` is useful for opaque byte blocks,
+while the other types communicate the intended meaning of a value. Any basic
+type—not just `data`—can use `options.constant` for a fixed value, for example:
+
+```json
+{ "name": "version", "type": "uint", "size": 1,
+  "options": { "constant": 2 } }
+```
+
+For `data`, the constant is an array of bytes, such as `[255, 71]`; for
+`int`, `uint`, and `float`, it is a number that fits the selected type and
+size.
+
+`length` and `checksum` are computed types that preserve message structure:
+
+| Type | Options | Result |
+|---|---|---|
+| `length` | `fields`, `byte_order`; optional `fuzzable` | Encodes the combined size of named fields or a finite stream. |
+| `checksum` | `algorithm`, `over`, `byte_order` | Emits a CRC over the named field or stream bytes. |
+
+Set `fuzzable: true` on a length field when the campaign should also explore
+incorrect lengths. Checksums support `"crc16-modbus"` and
+`"crc16-mcrf4xx"`; place a checksum after the bytes it covers in a stream.
+
+#### 2.5.3 Streams and hooks
+
+A stream models input that firmware consumes incrementally, such as UART
+data. It has a destination location, an optional `chunk_size` (one byte by
+default), and optionally an ordered list of fields that form one finite
+message. A stream without `fields` is an open-ended raw input source.
+
+```json
+{ "name": "uart_rx", "location": "r1",
+  "fields": ["header", "payload_length", "payload", "crc"] }
+```
+
+A hook is the firmware address at which FastDyn injects a delayed direct field
+or emits the next stream chunk. Everything not named by a hook is injected at
+snap. The property is named `fields`, but it may list fields and streams.
+
+```json
+"hooks": [
+  { "at": "0x08002110", "fields": ["uart_rx"] }
+]
+```
+
+## 3. Combining Stages: Rehosting and Fuzzing Workflow
 
 The four subcommands compose into a single deterministic pipeline. The following is the intended per-iteration sequence, plus how a caller reruns individual stages when they need to.
 
@@ -270,8 +385,107 @@ Each stage is idempotent when re-invoked with `--force`:
 - Re-run `trace-analyze` when the LLM has produced a `routing.json` that needs to become the next prompt, or when the last probe-run produced different exit reasons.
 - Re-run `llm` when adjusting model, reasoning-effort, temperature, or provider parameters against the same prompt.
 
+### 3.3 Fuzzing examples after rehosting
+
+Fuzzing begins after the rehosting loop has made the selected input path
+repeatable. It is not another automatic-rehosting stage: use the rehosted
+firmware, select a parser interface, and supply a schema that represents that
+interface. The two common patterns are a framed stream and a pre-existing
+parser buffer.
+
+#### Framed UART message
+
+This schema feeds a UART receive routine one byte at a time. It retains a
+fixed header, fuzzes the message identifier and payload, calculates a length,
+and appends a CRC:
+
+```json
+{
+  "flow": {
+    "snap": { "at": "0x080d7b72" },
+    "sync": { "at": "0x080d7ce6", "resume": "0x080d7b72" }
+  },
+  "fields": [
+    { "name": "available_bytes", "location": "reg(0)", "type": "length", "size": 1,
+      "options": { "fields": ["uart_rx"], "byte_order": "little" } },
+    { "name": "header", "type": "data", "size": 2,
+      "options": { "constant": [255, 71] } },
+    { "name": "message_id", "type": "uint", "size": 2 },
+    { "name": "payload_size", "type": "length", "size": 1,
+      "options": { "fields": ["payload"], "byte_order": "little", "fuzzable": true } },
+    { "name": "payload", "type": "data", "size": 16 },
+    { "name": "frame_crc", "type": "checksum", "size": 2,
+      "options": { "algorithm": "crc16-modbus", "over": ["uart_rx"], "byte_order": "little" } }
+  ],
+  "streams": [
+    { "name": "uart_rx", "location": "r1",
+      "fields": ["header", "message_id", "payload_size", "payload", "frame_crc"] }
+  ],
+  "hooks": [
+    { "at": "0x080d7bbc", "fields": ["uart_rx"] }
+  ]
+}
+```
+
+#### Parser buffer and its length
+
+When firmware already has a complete input buffer, direct fields are simpler.
+This example fuzzes a message class, identifier, payload, and its
+little-endian payload length in the existing parser structure:
+
+```json
+{
+  "fields": [
+    { "name": "ubx_class", "location": "r0 + 0x47a", "type": "data", "size": 1 },
+    { "name": "ubx_msg_id", "location": "r0 + 0x475", "type": "data", "size": 1 },
+    { "name": "payload_length_le", "location": "r0 + 0x476", "type": "length", "size": 2,
+      "options": { "fields": ["ubx_payload"], "byte_order": "little", "fuzzable": true } },
+    { "name": "ubx_payload", "location": "r0 + 0x62", "type": "data", "size": 1040 }
+  ]
+}
+```
+
+Launch a schema-driven fuzzing campaign with:
+
+```bash
+fastdyn run -c <config.toml>
+```
+
+Add `-p` to continue a previous campaign and reuse its existing corpus:
+
+```bash
+fastdyn run -c <config.toml> -p
+```
+
 ## 4. FIRE Project Integration Vision
-TODO
+
+### 4.1 Schema-driven fuzzing integration
+
+Fuzzing is the validation and vulnerability-discovery activity that follows a
+successful rehosting milestone. The workflow is:
+
+1. Identify an externally controlled interface, such as a parser buffer, UART
+   receive routine, or network packet path.
+2. Choose safe snap and completion points, then determine the registers or
+   buffers that carry its input.
+3. Start with small `data` fields; use a stream when the firmware consumes
+   input incrementally.
+4. Add constants, lengths, and checksums only where they help the parser reach
+   deeper behavior. Keep fields in wire order for framed streams.
+5. Run the campaign, confirm that input reaches the intended parser, and
+   refine the schema as target behavior becomes clearer.
+
+This schema is a useful hand-off format for FIRE tools. Static or dynamic
+analysis can propose parser locations, buffer expressions, message layouts,
+and derived values; a user or another tool can then generate and review JSON
+instead of implementing a custom harness. The selected control-flow points and
+memory locations should be reviewed before a campaign begins.
+
+```text
+Fuzzer input ──> schema fields / streams ──> FastDyn injection hooks ──> rehosted firmware
+     ^                                                                        │
+     └──────────── coverage, crashes, and progress ───────────────────────────┘
+```
 
 ## 5. Recommended STR Run Procedure and Smoke Test
 
@@ -293,7 +507,7 @@ docker run --rm fastdyn-env fastdyn --help
 # llm, run, loop, swarm, verifier, fuzz, timing-summary, harness, generate.
 ```
 
-### 5.3 Run the rehost pipeline against the reference board
+### 5.3 Run the rehost pipeline and fuzzing smoke test
 
 The delivered reference board is ArduRover 4.6.2 on CubeBlack (`configs/rover462.toml`). The firmware image is included at `virtuals/physics/flight_controllers/courbet/bin/ardurover_v462`.
 
@@ -324,6 +538,18 @@ fastdyn llm \
   --evaluate
 ```
 
+After the selected input path has been rehosted, create or select a fuzzing
+configuration with `fuzzing = true`, `coverage = true`, and `fuzzing_schema`
+set in `[Machine]`. Start the campaign with:
+
+```bash
+# Step 5 — schema-driven fuzzing
+fastdyn run -c <fuzzing-config.toml>
+
+# Continue a previous campaign with its existing corpus
+fastdyn run -c <fuzzing-config.toml> -p
+```
+
 Additional tuning flags for each step (RTOS-trace verbosity and buffer limits, sampling temperature, reasoning-effort, retries) are available via each subcommand's `--help`; the values shown above are the minimum set needed to complete a smoke run.
 
 ### 5.4 Expected artifacts
@@ -342,6 +568,11 @@ Additional tuning flags for each step (RTOS-trace verbosity and buffer limits, s
 | `fastdyn_work/trace_analysis/<analysis_id>/` | Per-analysis snapshot: `prompt.txt`, `selected_source.c`, `selected_macros.json`, `io_context.json`, `exec_trace.json`, `analysis.json`. |
 | `fastdyn_llm_history/` | Persistent history: `NNN_prompt.txt`, `NNN_response_*.txt` per iteration, plus `metrics.jsonl` when `--evaluate` is used. |
 | `boardrunner/boardrunner_sdk/model/*.c`, `.../build/*.so` | Patched / newly created peripheral models and their compiled scrolls. |
+| `fastdyn_work/corpus/` | Interesting fuzzing inputs retained by the campaign. Preserve this directory with `fastdyn run -p` to continue from the prior corpus. |
+| `fastdyn_work/crashes/` | Inputs associated with crashes found during a fuzzing campaign. |
+| `fastdyn_work/stats.jsonl` | Fuzzing campaign progress and statistics. |
+| `fastdyn_work/bbl.txt`, `fastdyn_work/edges.txt` | Basic-block coverage; edge coverage is written when enabled. |
+| `fastdyn_work/fuzzer.log`, `fastdyn_work/timeout.log` | Fuzzer runtime and timeout diagnostics. |
 
 ### 5.5 STR integration checklist
 
@@ -353,6 +584,7 @@ Additional tuning flags for each step (RTOS-trace verbosity and buffer limits, s
 - Run `fastdyn llm --evaluate` and confirm that a new `NNN_prompt.txt` / `NNN_response_1.txt` pair appears under `fastdyn_llm_history/` and that `metrics.jsonl` gets a new record.
 - Verify that any generated / edited `boardrunner_sdk/model/*.c` compiles cleanly against `libboardrunner_vio.so` and that the resulting `.so` loads on the next `probe-run` without warnings.
 - Verify that repeated iterations of the four-stage loop monotonically increase unique-basic-block coverage or advance the last-hit milestone recorded in `analysis.json`.
+- For a rehosted input path, enable `fuzzing` and `coverage` in the target TOML, supply a reviewed fuzzing schema, and confirm that generated input reaches the intended parser.
 
 ## 6. Firmware-Content Transparency for LLM Prompts
 
