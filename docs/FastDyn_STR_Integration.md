@@ -9,7 +9,7 @@
 | CLI parameters and usage | Section 1: `fastdyn` entry point, subcommand reference, invocation examples. |
 | How the tool consumes models, firmware, and fuzzing inputs | Section 2: static-analysis cache, `boardrunner_sdk` model layout, TOML conventions, and fuzzing schema. |
 | Workflow / integration example | Section 3: rehosting loop plus schema examples; Section 5 walk-through. |
-| FIRE toolchain relationship | Section 4: rehosting and schema-driven fuzzing integration. |
+| FIRE toolchain relationship | Section 4: FastDyn's role in the multi-fidelity workflow, relationship to other FIRE tools, and schema-driven fuzzing integration. |
 | Docker build and smoke test | Section 5: container build, verification steps, expected artifacts, integration checklist. |
 | IP-sensitivity of LLM prompts | Section 6: transparent account of what firmware content is sent to the LLM. |
 
@@ -112,13 +112,12 @@ Executes the firmware under QEMU with the FastDyn plugin loaded. On an unhandled
 | Flag | Type / Default | Purpose |
 |---|---|---|
 | `-c, --config` | path (required) | TOML configuration. |
-| `-o, --work-dir` | path (default: `./fastdyn_work`) | Output directory. Cleaned on each run unless `--persist-work-dir`. |
+| `-o, --work-dir` | path (default: `./fastdyn_work`) | Output directory. |
 | `-s, --svd` | path (override) | SVD override for this run. |
-| `-p, --persist-work-dir` | flag | Preserve outputs across successive runs. |
-| `--run-gdb / --no-run-gdb` | flag (override) | Force `[Machine].enable_gdb` on or off from the CLI. When on, QEMU pauses at reset and exposes gdbstub on `localhost:1234`. |
-| `--rtos-introspect / --no-rtos-introspect` | flag | Enable RTOS thread introspection using the RTOS schema produced by `static-analyze`. |
-| `--rtos-introspect-mode` | choice: `summary\|events\|debug` (default: `summary`) | Verbosity of the RTOS trace. |
-| `--rtos-introspection-max-events` | int (default: 4096) | Cap on stored context-switch events. |
+| `--run-gdb` | flag | Override `[Machine].enable_gdb`. When on, QEMU pauses at reset and exposes gdbstub on `localhost:1234`. |
+| `--rtos-introspect` | flag | Enable RTOS thread introspection using the schema produced by `static-analyze`. |
+
+Additional flags controlling work-dir persistence and RTOS-trace verbosity are documented in `fastdyn probe-run --help`.
 
 Preconditions: a valid static-analysis cache. If the cache is missing or stale, run `static-analyze --force` first.
 
@@ -192,14 +191,7 @@ The image entrypoint drops into `/workspace/FastDyn` with the Python venv activa
 
 ### 1.3 Secondary subcommands (reference only)
 
-The following subcommands exist on the CLI and are documented here for completeness; they are not used by the automatic rehosting flow described in this guide:
-
-- `fastdyn loop` — wrapper around `run` with auto-restart on clean exit.
-- `fastdyn swarm` — parallel workers with per-worker port ranges.
-- `fastdyn verifier` — cross-check emulated behavior against a reference hardware log *(hardware-mode; not used here)*.
-- `fastdyn fuzz` — hardware-trace-driven data-register discovery *(hardware-mode; not used here)*.
-- `fastdyn generate` — legacy prompt generation from a hardware trace *(hardware-mode; not used here)*.
-- `fastdyn timing-summary`, `fastdyn harness` — instrumentation utilities.
+The CLI also exposes `loop`, `swarm`, `timing-summary`, and `harness` for orchestration and instrumentation, plus `verifier`, `fuzz`, and `generate` for hardware-mode workflows out of scope for this document. Run `fastdyn --help` for their signatures.
 
 ## 2. How FastDyn Consumes Models and Firmware Inputs
 
@@ -213,28 +205,23 @@ The following subcommands exist on the CLI and are documented here for completen
 | MCU / SVD description | `-s/--svd` or default `third_party/common/cmsis-svd-data` | Maps MMIO addresses to peripheral and register names. |
 | Firmware driver source roots | `[Rehosting.directories].firmware_source_roots` | Provides ArduPilot-style HAL drivers for macro extraction and source context in prompts. |
 | Firmware build roots | `[Rehosting.directories].firmware_build_roots` | Provides compile-unit metadata (DWARF, preprocessed macros) when the source tree alone is insufficient. |
-| Modeling directory | `[Rehosting.directories].modeling_dir` | Where LLM-generated / hand-edited peripheral models live (`boardrunner/boardrunner_sdk/model/*.c`). |
+| Modeling directory | `[Rehosting.directories].modeling_dir` | Where LLM-generated peripheral models live (`boardrunner/boardrunner_sdk/model/*.c`). |
 
 ### 2.2 Static analysis cache layout
 
-After `fastdyn static-analyze`, the cache directory contains a stable set of JSON artifacts used by all downstream stages. Names in the current implementation include:
+After `fastdyn static-analyze`, the cache directory contains a stable set of JSON artifacts consumed by every downstream stage. The layout groups into five categories:
 
-| Artifact | Contents |
+| Category | Artifacts |
 |---|---|
-| `binary.json`, `sections.json`, `segments.json` | ELF metadata, load segments. |
-| `symbols.json`, `functions.json` | Symbol table with demangled names and function bounds. |
-| `compile_units.json`, `source_map.json` | DWARF compile-unit → source-file mapping. |
-| `vector_table.json`, `irq_handlers.json` | Cortex-M vector table and IRQ handler symbols. |
-| `svd_map.json`, `svd_summary.json` | SVD peripheral / register maps aligned to the machine platform. |
-| `callgraph.json` | Static call graph derived from the disassembly. |
-| `probe_faults.json` | Predicted MMIO fault sites used to warm up the probe loop. |
-| `rtos_identity.json`, `rtos_symbols.json`, `rtos_schema.json`, `rtos_schema.txt` | RTOS type detection and introspection schema. |
-| `macro_context.json`, `macros/index.json`, `macros/*.json` | Extracted preprocessor macros. |
-| `constants.json`, `literal_pools.json`, `mmio_constants.json` | Constant pools referenced from code. |
+| Binary metadata | `binary.json`, `sections.json`, `segments.json` — ELF header, sections, load segments. |
+| Symbols and source | `symbols.json`, `functions.json`, `compile_units.json`, `source_map.json` — demangled symbols, function bounds, DWARF-driven source mapping. |
+| Peripheral map | `svd_map.json`, `svd_summary.json`, `vector_table.json`, `irq_handlers.json` — SVD-aligned peripheral / register maps plus Cortex-M vector table and IRQ handler symbols. |
+| RTOS introspection | `rtos_identity.json`, `rtos_symbols.json`, `rtos_schema.json`, `rtos_schema.txt` — RTOS type detection and event schema for the probe-run tracer. |
+| Static analysis | `callgraph.json`, `probe_faults.json`, `macro_context.json`, `macros/`, `constants.json`, `literal_pools.json`, `mmio_constants.json` — call graph, predicted MMIO fault sites, preprocessor macros, and constant pools. |
 
 ### 2.3 Peripheral models — `boardrunner_sdk` layout
 
-Generated peripheral models live under `boardrunner/boardrunner_sdk/`. Model authors generate one C file per peripheral in `model/*.c`; each file compiles to a same-named `.so` scroll in `boardrunner/boardrunner_sdk/build/`. The scrolls are loaded by the FastDyn plugin based on the TOML routing table.
+Peripheral models live under `boardrunner/boardrunner_sdk/`. Each peripheral is represented by one C file in `model/*.c`; each file compiles to a same-named `.so` scroll in `boardrunner/boardrunner_sdk/build/`. The scrolls are loaded by the FastDyn plugin based on the TOML routing table.
 
 ```
 boardrunner/boardrunner_sdk/
@@ -243,7 +230,6 @@ boardrunner/boardrunner_sdk/
 ├── include/boardrunner/      public headers exposed to model writers
 │   ├── vio.h                 umbrella header
 │   ├── spi.h, i2c.h, dma.h, signals.h, pty.h, net.h, fifo.h, fileio.h
-│   └── imu_sample.h          canonical sample types for sensor VIO
 ├── model/                    one .c file per peripheral or slave
 │   ├── rcc.c, pwr.c, systick.c, dwt.c, flash.c
 │   ├── gpioa.c … gpioi.c
@@ -284,7 +270,7 @@ The main schema sections are `flow`, `fields`, `streams`, and `hooks`.
 the target consumes input: FastDyn restores the snapshot, obtains a fresh
 fuzzer input, and injects ordinary fields. **Sync** is after that input has
 been processed; its `resume` address restarts execution for the next test
-case, and should be directed to the address of snap. Often times there are
+case, and should be directed to the address of snap. Often, there are
 multiple points at which an input handler can exit, and multiple sync points
 are required.
 
@@ -366,38 +352,11 @@ snap. The property is named `fields`, but it may list fields and streams.
 
 ## 3. Combining Stages: Rehosting and Fuzzing Workflow
 
-The four subcommands compose into a single deterministic pipeline. The following is the intended per-iteration sequence, plus how a caller reruns individual stages when they need to.
+The rehost pipeline's subcommands compose into a single deterministic loop. The following is the intended per-iteration sequence, plus how a caller reruns individual stages when they need to.
 
 ### 3.1 First-iteration flow
 
-```
-1. fastdyn static-analyze -c configs/<board>.toml \
-     -s third_party/common/cmsis-svd-data --force
-   → fills fastdyn_static_analysis/
-
-2. fastdyn probe-run -c configs/<board>.toml -o fastdyn_recent_run
-   → runs QEMU until it either hits a milestone, faults on an
-     unhandled MMIO range, or the caller stops the run
-   → fills fastdyn_recent_run/probe_result.json, qemu.log,
-     rtos_summary.json, rtos_recent_switches.jsonl, dev_config.json
-
-3. fastdyn trace-analyze -c configs/<board>.toml \
-     -o fastdyn_work --latest-run-dir fastdyn_recent_run
-   → fills fastdyn_work/prompt.txt, fastdyn_work/analysis.json
-   → fills fastdyn_work/trace_analysis/<analysis_id>/{prompt.txt,
-     selected_source.c, selected_macros.json, io_context.json,
-     exec_trace.json, analysis.json}
-
-4. fastdyn llm -d fastdyn_work --compile --model gpt-4o \
-     --reasoning-effort medium --evaluate
-   → sends fastdyn_work/prompt.txt to the LLM
-   → applies SEARCH/REPLACE or writes a new model .c file
-   → invokes cmake to rebuild the affected .so
-   → appends fastdyn_llm_history/NNN_prompt.txt,
-     NNN_response_*.txt, and metrics.jsonl
-```
-
-Then loop back to step 2. Each pass usually advances the firmware further into initialization. Coverage growth and milestone hits are the intended per-iteration success signal.
+The concrete four-command sequence and its expected outputs are documented in §5.3 (rehost pipeline) and §5.4 (expected artifacts). After each pass, callers loop back to `probe-run`; coverage growth and milestone hits recorded in `analysis.json` are the intended per-iteration success signal.
 
 ### 3.2 Rerunning individual stages
 
@@ -408,7 +367,7 @@ Each stage is idempotent when re-invoked with `--force`:
 - Re-run `static-analyze --force` when the firmware ELF changes.
 - Re-run `probe-run` after any change to a model `.so`; the cache is unaffected.
 - Re-run `trace-analyze` when the LLM has produced a `routing.json` that needs to become the next prompt, or when the last probe-run produced different exit reasons.
-- Re-run `llm` when adjusting model, reasoning-effort, temperature, or provider parameters against the same prompt.
+- Re-run `llm` when adjusting the model, provider, or other invocation parameters against the same prompt.
 
 ### 3.3 Fuzzing examples after rehosting
 
@@ -484,7 +443,55 @@ fastdyn run -c <config.toml> -p
 
 ## 4. FIRE Project Integration Vision
 
-### 4.1 Schema-driven fuzzing integration
+### 4.1 FastDyn's role in FIRE
+
+FastDyn is the **firmware-hosted high-fidelity confirmation** layer of the FIRE multi-fidelity workflow. It sits downstream of the abstract and Lo-Fi cyber-physical analysis stages: candidates identified by CP-Reach and refined by CP-Glimpse become concrete parameter sets and scenario configurations that FastDyn executes against the actual firmware image, running under an instruction-accurate QEMU with LLM-generated peripheral models. Once an input-processing path is rehosted, schema-driven fuzzing (§4.4) is the mechanism by which FastDyn contributes vulnerability evidence back to the workflow.
+
+| Tool / layer | Primary role in FIRE | Typical input | Typical output |
+|---|---|---|---|
+| Rumoca | Modelica authoring, compilation, model generation, and interoperability layer. | Modelica package / class. | Symbolic / DAE representation, simulation-ready model, generated code, FMU artifact. |
+| CP-Reach | Fast abstract screening of bounded disturbances and reachable unsafe regions. | Abstracted system model + disturbance / parameter bounds. | Candidate unsafe regions, parameter bounds, vulnerability hypotheses. |
+| CP-Glimpse | Scenario-defined multi-component Lo-Fi closed-loop evaluation with detailed cyber-physical models. | Rumoca-managed model components + vulnerability model / parameters + scenario YAML. | Time-series evidence, refined vulnerability hypotheses, validated parameter ranges. |
+| **FastDyn** | **Firmware-hosted Hi-Fi confirmation that integrates the refined cyber-physical model with the actual hosted firmware and higher-fidelity execution / environment behavior, plus schema-driven fuzzing of rehosted interfaces.** | **Refined cyber-physical model + vulnerability hypothesis / scenario + hosted firmware.** | **Confirmation or rejection of the vulnerability hypothesis, Hi-Fi evidence, crash / coverage artifacts, and model-refinement feedback.** |
+
+### 4.2 Relationship to other FIRE tools
+
+**Rumoca as the common modeling layer.** FastDyn does not author its own physics models. Vehicle plants, sensor models, actuator models, and environment blocks used to close the loop against the emulated firmware should be authored in Modelica through Rumoca and materialized as FMU-3 artifacts. FastDyn already includes an FMU-driven simulation harness (`fastdyn.fmu_build`, activated via `[FMU]` sections in the TOML), so a Rumoca-authored Modelica model can be reused across CP-Glimpse and FastDyn without independent re-implementation.
+
+**CP-Reach handoff.** Reachability results from CP-Reach constrain the FastDyn scenario space: parameter bounds and unsafe operating regions identified upstream become the initial conditions and disturbance profiles applied to the FMU plant that FastDyn drives against the firmware.
+
+**CP-Glimpse handoff.** When a Lo-Fi vulnerability candidate is confirmed by CP-Glimpse, FastDyn confirms whether the effect persists once the real firmware's timing, scheduler, sensor sampling, actuator quantization, and driver-level behavior are applied. Where possible, the same physical parameters, disturbance definitions, and observable outputs are preserved across the CP-Glimpse → FastDyn transition so that any disagreement can be attributed to model fidelity or firmware behavior rather than scenario drift.
+
+**Feedback to upstream stages.** If FastDyn's firmware-hosted result disagrees with the CP-Glimpse prediction, the mismatch feeds back to earlier modeling stages. The Rumoca model, reachability abstraction, vulnerability surrogate, parameter bounds, or component timing can be revised and the analysis repeated. FastDyn is the firmware-hosted confirmation stage of an iterative model-refinement workflow, not an isolated final simulator.
+
+### 4.3 Multi-fidelity workflow
+
+```mermaid
+flowchart TD
+    rumoca["Rumoca / Modelica<br/>common modeling + FMU generation"]
+    abstract["Abstract model"]
+    reach["CP-Reach<br/>reachability screening"]
+    candidates[("Candidate regions /<br/>parameter bounds")]
+    glimpse["CP-Glimpse<br/>Lo-Fi closed-loop<br/>evaluation"]
+    refined[("Refined vulnerability<br/>hypothesis + evidence")]
+    fastdyn["FastDyn<br/>firmware-hosted Hi-Fi<br/>confirmation + fuzzing"]
+    result[("Confirmation / rejection /<br/>refinement feedback")]
+
+    rumoca --> abstract
+    rumoca --> glimpse
+    rumoca --> fastdyn
+    abstract --> reach
+    reach --> candidates
+    candidates --> glimpse
+    glimpse --> refined
+    refined --> fastdyn
+    fastdyn --> result
+    result -.->|"model-refinement feedback"| rumoca
+```
+
+**Key integration principle.** Fidelity increases from CP-Reach → CP-Glimpse → FastDyn, but system identity, vulnerability hypothesis, parameter provenance, and scenario intent remain traceable across every stage. What allows a reachability finding to become a reproducible Lo-Fi test, a meaningful firmware-hosted confirmation, and — once rehosted — a fuzzing target with concrete coverage and crash evidence, is exactly this preserved provenance.
+
+### 4.4 Schema-driven fuzzing integration
 
 Fuzzing is the validation and vulnerability-discovery activity that follows a
 successful rehosting milestone. The workflow is:
@@ -589,7 +596,7 @@ Additional tuning flags for each step (RTOS-trace verbosity and buffer limits, s
 | `fastdyn_recent_run/dev_config.json` | Fully materialized device / handler / slave table derived from the TOML. |
 | `fastdyn_work/prompt.txt` | The LLM prompt for this iteration. Contains loaded-peripheral summary, RTOS context, DMA / memory trace excerpts, execution-trace summary, source context, macros, and diagnostic instructions. |
 | `fastdyn_work/analysis.json` | Metadata for the prompt: analysis_id, run_id, prompt_kind, target_peripheral, exit_reason, config path, modeling dir. |
-| `fastdyn_work/routing.json` | (Iteration-produced) LLM routing decision when the pipeline cannot identify the fault peripheral. Consumed on the next `trace-analyze --apply-routing`. |
+| `fastdyn_work/routing.json` | (Iteration-produced) LLM routing decision when the pipeline cannot identify the fault peripheral. Consumed on the next `trace-analyze` iteration when routing is applied. |
 | `fastdyn_work/trace_analysis/<analysis_id>/` | Per-analysis snapshot: `prompt.txt`, `selected_source.c`, `selected_macros.json`, `io_context.json`, `exec_trace.json`, `analysis.json`. |
 | `fastdyn_llm_history/` | Persistent history: `NNN_prompt.txt`, `NNN_response_*.txt` per iteration, plus `metrics.jsonl` when `--evaluate` is used. |
 | `boardrunner/boardrunner_sdk/model/*.c`, `.../build/*.so` | Patched / newly created peripheral models and their compiled scrolls. |
@@ -603,12 +610,12 @@ Additional tuning flags for each step (RTOS-trace verbosity and buffer limits, s
 
 - Verify that the FastDyn image builds successfully from the provided `Dockerfile` and that `fastdyn --help` runs inside the container.
 - Verify that a valid `.env` file (or environment variables) is available with `OPENAI_API_KEY` before invoking `fastdyn llm --model-provider openai`, or that a running Ollama endpoint is reachable at `--ollama-url` when using `--model-provider ollama`.
-- Run `static-analyze` against the reference `configs/rover462.toml` and confirm that `fastdyn_static_analysis/` contains the artifacts enumerated in § 2.2.
+- Run `static-analyze` against the reference `configs/rover462.toml` and confirm that `fastdyn_static_analysis/` contains the artifacts enumerated in §2.2.
 - Run one `probe-run` iteration and confirm that `probe_result.json` and `qemu.log` are produced, and that `rtos_summary.json` shows a non-zero thread count when RTOS introspection is enabled.
 - Run `trace-analyze` and confirm that `prompt.txt` and `analysis.json` are produced under both `fastdyn_work/` and `fastdyn_work/trace_analysis/<analysis_id>/`.
 - Run `fastdyn llm --evaluate` and confirm that a new `NNN_prompt.txt` / `NNN_response_1.txt` pair appears under `fastdyn_llm_history/` and that `metrics.jsonl` gets a new record.
-- Verify that any generated / edited `boardrunner_sdk/model/*.c` compiles cleanly against `libboardrunner_vio.so` and that the resulting `.so` loads on the next `probe-run` without warnings.
-- Verify that repeated iterations of the four-stage loop monotonically increase unique-basic-block coverage or advance the last-hit milestone recorded in `analysis.json`.
+- Verify that any generated `boardrunner_sdk/model/*.c` compiles cleanly against `libboardrunner_vio.so` and that the resulting `.so` loads on the next `probe-run` without warnings.
+- Verify that repeated iterations of the rehost loop monotonically increase unique-basic-block coverage or advance the last-hit milestone recorded in `analysis.json`.
 - For a rehosted input path, enable `fuzzing` and `coverage` in the target TOML, supply a reviewed fuzzing schema, and confirm that generated input reaches the intended parser.
 
 ## 6. Firmware-Content Transparency for LLM Prompts
@@ -628,8 +635,8 @@ This section is an honest account of what firmware-derived content ends up in th
 **Conditionally included:**
 
 - RTOS context (thread names, priorities, states, recent context switches) only when RTOS introspection is enabled and the schema is present in the cache.
-- The current device-model source (the `.c` file being patched) only in `implementation` and `routed` prompts, not in diagnostic prompts.
-- The full text of a prior LLM `routing.json`, only when `--apply-routing` is used and only in the specific analysis directory for that iteration.
+- The current device-model source (the `.c` file being patched) only when the pipeline is targeting a known peripheral, not when it is asking the LLM for a routing decision on an unclassified fault.
+- The full text of a prior LLM routing decision, only when a subsequent `trace-analyze` iteration consumes it, and only in the specific analysis directory for that iteration.
 
 **Never included:**
 
