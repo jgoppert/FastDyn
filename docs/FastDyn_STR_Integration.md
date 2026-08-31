@@ -48,6 +48,7 @@ Each iteration of this loop either advances the firmware past a previously unhan
 ### Schema-driven fuzzing
 
 ```mermaid
+%%{init: {"themeVariables": {"edgeLabelBackground": "transparent"}, "themeCSS": ".edgeLabel, .edgeLabel div, .edgeLabel p { background: transparent !important; } .edgeLabel p { text-shadow: 0 0 1px rgba(0, 0, 0, 0.9); }"}}%%
 flowchart LR
     toml["Fuzzing TOML<br/>configuration"]
     schema["Fuzzing schema<br/>configuration"]
