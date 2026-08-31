@@ -30,7 +30,7 @@ rejected.
 | `expression.c` | Recursive-descent parser for field and stream destination expressions. It reads target registers and memory through the fuzz API. |
 | `fields.c` | Takes the fuzzer input, assigns fixed-field input ranges, materializes field values once per iteration, and writes normal fields to guest registers or memory. |
 | `types.c` | Type-handler registry and implementations for `int`, `uint`, `float`, `data`, `length`, and `checksum`. |
-| `streams.c` | Parses streams, resolves their ordered field-name lists, assigns their shared input suffix, emits one byte per hook visit, and keeps emitted-byte history for derived types. |
+| `streams.c` | Parses streams, resolves their ordered field-name lists, assigns their shared input suffix, emits configurable chunks per hook visit, and keeps emitted-byte history for derived types. |
 | `hooks.c` | Parses and installs injection hooks, binds hook names to top-level fields or streams, and dispatches hook callbacks. |
 | `flow.c` | Parses and installs the optional state/snapshot/synchronization loop. |
 | `meson.build` | Adds this directory's implementation files to the FastDyn build. |
@@ -249,25 +249,33 @@ CRC bytes.
 
 ## `streams`
 
-A stream models an input source that is read one byte at a time:
+A stream models an input source consumed at each hook visit. It emits one byte
+per visit by default; set `chunk_size` to emit a larger chunk:
 
 ```json
 {
   "name": "uart_rx",
   "location": "r1",
+  "chunk_size": 1,
   "fields": ["header", "payload", "crc"]
 }
 ```
 
 `name` and `location` are required. Every stream must be named by exactly one
-`inject` hook. A hook writes its next byte to the location; after all data is
-exhausted it writes zero.
+`inject` hook. `chunk_size` is optional, defaults to `1`, and must be a
+positive integer no greater than `INT_MAX`. A hook writes the next chunk to the
+location; after the stream's data is exhausted, the remaining bytes are zero.
+
+For memory destinations, the chunk is written contiguously from the resolved
+address. For `reg(N)` destinations, up to the first four bytes are packed
+little-endian into the 32-bit register; use a memory destination for chunks
+larger than four bytes.
 
 Without `fields`, a stream is unbounded and emits successive bytes from the
 shared input suffix. With `fields`, it emits the named top-level field
 definitions as a finite sequence. `fields` is a non-empty ordered array of
 unique field names. Each referenced field is materialized using its ordinary
-type handler; the stream only controls the byte-by-byte destination and
+type handler; the stream only controls the destination, chunking, and
 ordering. A finite stream's declared size is the sum of its referenced field
 sizes, including constants and computed bytes, so a `length` field can
 describe it.

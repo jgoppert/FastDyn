@@ -11,6 +11,7 @@ enum StreamProperty {
     StreamName = 1U << 0,
     StreamLocation = 1U << 1,
     StreamFields = 1U << 2,
+    StreamChunkSize = 1U << 3,
     StreamProperties = StreamName | StreamLocation,
 };
 
@@ -59,6 +60,22 @@ static bool parse_field_names(const cJSON *json, struct Stream *stream)
         }
         i++;
     }
+    return true;
+}
+
+static bool parse_chunk_size(const cJSON *json, struct Stream *stream)
+{
+    double value;
+
+    if (!cJSON_IsNumber(json) || stream == NULL) {
+        return false;
+    }
+    value = json->valuedouble;
+    if (value < 1.0 || value > (double)INT_MAX ||
+        value != (double)(size_t)value) {
+        return false;
+    }
+    stream->chunk_size = (size_t)value;
     return true;
 }
 
@@ -123,6 +140,7 @@ bool schema_streams_parse(const cJSON *json, struct Stream ***streams,
             goto fail;
         }
         stream->hook_index = SIZE_MAX;
+        stream->chunk_size = 1;
         loaded[i] = stream;
         cJSON_ArrayForEach(value, item) {
             unsigned int property;
@@ -133,12 +151,17 @@ bool schema_streams_parse(const cJSON *json, struct Stream ***streams,
             }
             property = strcmp(value->string, "name") == 0 ? StreamName :
                        strcmp(value->string, "location") == 0 ? StreamLocation :
-                       strcmp(value->string, "fields") == 0 ? StreamFields : 0;
+                       strcmp(value->string, "fields") == 0 ? StreamFields :
+                       strcmp(value->string, "chunk_size") == 0 ? StreamChunkSize : 0;
             if (property == 0 || (properties & property) != 0) {
                 goto fail;
             }
             if (property == StreamFields) {
                 if (!parse_field_names(value, stream)) {
+                    goto fail;
+                }
+            } else if (property == StreamChunkSize) {
+                if (!parse_chunk_size(value, stream)) {
                     goto fail;
                 }
             } else {
@@ -295,34 +318,50 @@ void schema_stream_write_next(struct Stream *stream)
     const uint8_t *input = schema_input_bytes();
     size_t input_size = schema_input_actual_size();
     struct Location location;
-    uint8_t value = 0;
+    uint8_t *values;
+    size_t i;
 
     /* A stream is delivered at an execution event, so register-derived
      * destinations such as "r1" must describe that event's current output
-     * byte, not the value r1 happened to hold at the snapshot. The grammar is
+     * buffer, not the value r1 happened to hold at the snapshot. The grammar is
      * shared with fields; only the evaluation time differs. */
     if (stream == NULL ||
         !generic_parse_expression(stream->location_text, &location)) {
         return;
     }
+    values = calloc(stream->chunk_size, sizeof(*values));
+    if (values == NULL) {
+        return;
+    }
     stream->location = location;
     stream->location_resolved = true;
-    if (stream->field_count != 0) {
-        if (!stream_field_next(stream, &value)) {
+    for (i = 0; i < stream->chunk_size; i++) {
+        if (stream->field_count != 0) {
+            if (!stream_field_next(stream, &values[i])) {
+                free(values);
+                return;
+            }
+            stream->cursor++;
+        } else if (stream_input_offset <= input_size &&
+                   stream_input_cursor < input_size - stream_input_offset) {
+            values[i] = input[stream_input_offset + stream_input_cursor++];
+            stream->cursor++;
+        }
+        if (!append_emitted(stream, values[i])) {
+            free(values);
             return;
         }
-        stream->cursor++;
-    } else if (stream_input_offset <= input_size &&
-               stream_input_cursor < input_size - stream_input_offset) {
-        value = input[stream_input_offset + stream_input_cursor++];
-        stream->cursor++;
     }
     if (location.type == Register) {
+        uint32_t value = 0;
+
+        memcpy(&value, values,
+               stream->chunk_size < sizeof(value) ? stream->chunk_size : sizeof(value));
         fuzz_set_register(value, location.val.reg);
     } else if (location.type == Memory) {
-        (void)fuzz_write_memory(location.val.address, &value, 1);
+        (void)fuzz_write_memory(location.val.address, values, (int)stream->chunk_size);
     }
-    (void)append_emitted(stream, value);
+    free(values);
 }
 
 bool schema_streams_finalize(struct Stream **streams, size_t stream_count,

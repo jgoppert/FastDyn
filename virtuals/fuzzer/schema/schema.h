@@ -65,9 +65,11 @@ struct Stream {
     bool location_resolved;
     size_t hook_index;
     size_t cursor;
+    size_t chunk_size;
 
     /* Optional finite sequence of top-level field definitions. Without
-     * fields, a stream retains its unbounded raw-byte behavior. */
+     * fields, a stream retains its unbounded raw-byte behavior. Each hook
+     * invocation emits chunk_size bytes (one by default). */
     char **field_names;
     struct Field **fields;
     size_t field_count;
