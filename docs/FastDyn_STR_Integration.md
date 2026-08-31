@@ -15,7 +15,9 @@
 
 > **Architecture status note.** FastDyn's LLM-driven rehost stage is under active development. The user-facing contract this document intends to keep stable is the **CLI-driven pipeline shape** (a small set of subcommands invoked from a container, driven by a single TOML per firmware, producing artifacts under a work directory) rather than the exact command names or stage boundaries. The **TOML configuration schema**, the **Docker build recipe**, the **static-analysis cache format**, and the **artifact categories listed in §5.4** are intended to remain consistent. The current pipeline exposes four subcommands (`static-analyze`, `probe-run`, `trace-analyze`, `llm`); future revisions may consolidate or rename stages — in particular, `trace-analyze` and `llm` may merge into a single execution step. Integration automation should pin a tested FastDyn revision and expect that command names, `llm`-side flags, and internal artifact files may change between revisions.
 
-## Automatic-rehosting workflow at a glance
+## Integration workflows at a glance
+
+### Automatic rehosting
 
 ```mermaid
 flowchart TD
@@ -42,6 +44,28 @@ flowchart TD
 ```
 
 Each iteration of this loop either advances the firmware past a previously unhandled MMIO access, refines a peripheral model that returned wrong values, or emits a routing decision when the LLM determines that a different peripheral is at fault. The loop terminates when the firmware reaches a user-specified milestone (control loop, arming, first sensor read, etc.) without further MMIO faults. Schema-driven fuzzing is a subsequent activity.
+
+### Schema-driven fuzzing
+
+```mermaid
+flowchart LR
+    toml["Fuzzing TOML<br/>configuration"]
+    schema["Fuzzing schema<br/>configuration"]
+    libafl["libAFL"]
+    fuzzer["FastDyn fuzzer"]
+    engine["Schema engine"]
+    qemu["QEMU + rehosted firmware"]
+
+    toml -->|"fuzzing settings and schema path"| fuzzer
+    schema -->|"flow, fields, streams, and hooks"| engine
+    libafl -->|"test-case input"| fuzzer
+    fuzzer -->|"input and iteration control"| engine
+    engine -->|"injected register and memory values"| qemu
+    qemu -->|"coverage and crash feedback"| libafl
+
+    classDef configuration stroke-dasharray: 5 5
+    class toml,schema configuration
+```
 
 > **Scope note.** The automatic-rehosting portion of this document omits the hardware-trace (`twintrace`) record/replay flow and the `LIBHW=true` physical-hardware backend. The schema-driven fuzzer described here operates on rehosted firmware and does not require a hardware trace. The subcommand reference below flags options belonging to hardware-mode flows as *(hardware-mode; not used here)*.
 
