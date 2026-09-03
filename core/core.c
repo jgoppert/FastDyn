@@ -184,7 +184,6 @@ size_t update_entry_count = 0;
 
 
 
-// Helper to parse a single line
 static int parse_update_line(const char *line, UpdateEntry *entry);
 int parse_update_line(const char *line, UpdateEntry *entry) {
     char buf[128];
@@ -205,19 +204,42 @@ int parse_update_line(const char *line, UpdateEntry *entry) {
     // Second token: target (rX, [rX] or 0xADDRESS)
 	token = strtok(NULL, " \t");
     if (!token) return -1;
-	if (token[0] == 'r') {
-    entry->type = TARGET_REGISTER;
-    entry->target.reg_num = strtoul(token + 1, &endptr, 0);
-    if (*endptr != '\0') return -1;
+    /*
+     * Architectural TCG Register Slot Mapping Conventions:
+     * - "rip" : Slot 16 (QEMU x86_64 TCG cpu_eip target)
+     * - "rsp" : Slot 4  (QEMU x86_64 TCG RSP target)
+     * - "pc"  : Slot 15 (QEMU ARM 32-bit TCG R15/PC target)
+     * - "sp"  : Slot 13 (QEMU ARM 32-bit TCG R13/SP target)
+     * - "rX"  : Slot X  (Numeric register index)
+     */
+	if (strcasecmp(token, "rip") == 0) {
+        entry->type = TARGET_REGISTER;
+        entry->target.reg_num = 16; // x86 RIP slot in TCG
+	} else if (strcasecmp(token, "rsp") == 0) {
+        entry->type = TARGET_REGISTER;
+        entry->target.reg_num = 4; // x86 RSP slot in TCG
+	} else if (strcasecmp(token, "riscv_pc") == 0 || strcasecmp(token, "pc32") == 0) {
+        entry->type = TARGET_REGISTER;
+        entry->target.reg_num = 32; // RISC-V PC slot in TCG
+	} else if (strcasecmp(token, "pc") == 0) {
+        entry->type = TARGET_REGISTER;
+        entry->target.reg_num = 32; // Default PC slot to 32 for RISC-V / 15 for ARM
+	} else if (strcasecmp(token, "sp") == 0) {
+        entry->type = TARGET_REGISTER;
+        entry->target.reg_num = 13; // ARM SP slot in TCG
+	} else if (token[0] == 'x' || token[0] == 'r') {
+        entry->type = TARGET_REGISTER;
+        entry->target.reg_num = strtoul(token + 1, &endptr, 0);
+        if (*endptr != '\0') return -1;
 	} else if (token[0] == '[' && token[strlen(token) - 1] == ']') {
-    // Target is [rX] dereference
+    // Target is [rX] or [xX] dereference
     token[strlen(token) - 1] = '\0'; // Remove trailing ']'
-    if (token[1] != 'r') {
+    if (token[1] != 'r' && token[1] != 'x') {
         fprintf(stderr, "Invalid target deref syntax: %s\n", token);
         return -1;
     }
     entry->type = TARGET_DEREF;
-    entry->target.reg_num = strtoul(token + 2, &endptr, 0); // skip [r
+    entry->target.reg_num = strtoul(token + 2, &endptr, 0); // skip [r or [x
     if (*endptr != '\0') return -1;
 	} else if (strncmp(token, "0x", 2) == 0) {
     entry->type = TARGET_MEMORY;
@@ -229,24 +251,45 @@ int parse_update_line(const char *line, UpdateEntry *entry) {
 	}
 
 
-    // Third token: value (immediate, register, or dereference)
+    // Third token: value (immediate, register, or dereference), optional assignment operator (<- = := ->)
     token = strtok(NULL, " \t");
     if (!token) return -1;
 
-    if (token[0] == 'r') {
+    if (strcmp(token, "<-") == 0 || strcmp(token, "=") == 0 ||
+        strcmp(token, ":=") == 0 || strcmp(token, "->") == 0) {
+        token = strtok(NULL, " \t");
+        if (!token) return -1;
+    }
+
+    if (strcasecmp(token, "rip") == 0) {
+        entry->value_type = VALUE_REGISTER;
+        entry->value.reg_num = 16;
+    } else if (strcasecmp(token, "rsp") == 0) {
+        entry->value_type = VALUE_REGISTER;
+        entry->value.reg_num = 4;
+    } else if (strcasecmp(token, "riscv_pc") == 0 || strcasecmp(token, "pc32") == 0) {
+        entry->value_type = VALUE_REGISTER;
+        entry->value.reg_num = 32;
+    } else if (strcasecmp(token, "pc") == 0) {
+        entry->value_type = VALUE_REGISTER;
+        entry->value.reg_num = 32;
+    } else if (strcasecmp(token, "sp") == 0) {
+        entry->value_type = VALUE_REGISTER;
+        entry->value.reg_num = 13;
+    } else if (token[0] == 'x' || token[0] == 'r') {
         // Source is a register value
         entry->value_type = VALUE_REGISTER;
         entry->value.reg_num = strtoul(token + 1, &endptr, 0);
         if (*endptr != '\0') return -1;
     } else if (token[0] == '[' && token[strlen(token) - 1] == ']') {
-        // Source is [rX] dereference
+        // Source is [rX] or [xX] dereference
         token[strlen(token) - 1] = '\0'; // strip trailing ']'
-        if (token[1] != 'r') {
+        if (token[1] != 'r' && token[1] != 'x') {
             fprintf(stderr, "Invalid dereference syntax: %s\n", token);
             return -1;
         }
         entry->value_type = VALUE_DEREF;
-        entry->value.reg_num = strtoul(token + 2, &endptr, 0); // skip [r
+        entry->value.reg_num = strtoul(token + 2, &endptr, 0); // skip [r or [x
         if (*endptr != '\0') return -1;
     } else {
         // Must be an immediate
@@ -392,16 +435,66 @@ uint32_t qemu_get_register(int reg)
     return return_data;
 }
 
+static struct qemu_plugin_register *g_pc_reg_handle = NULL;
+static struct qemu_plugin_register *g_sp_reg_handle = NULL;
+
+static void core_init_reg_handles(void)
+{
+    if (!g_register_descriptors) {
+        g_register_descriptors = qemu_plugin_get_registers();
+    }
+    if (!g_register_descriptors) {
+        return;
+    }
+    for (guint i = 0; i < g_register_descriptors->len; i++) {
+        qemu_plugin_reg_descriptor *rd = &g_array_index(g_register_descriptors, qemu_plugin_reg_descriptor, i);
+        if (rd->name) {
+            if (!g_pc_reg_handle && (g_ascii_strcasecmp(rd->name, "rip") == 0 ||
+                                     g_ascii_strcasecmp(rd->name, "pc") == 0 ||
+                                     g_ascii_strcasecmp(rd->name, "r15") == 0)) {
+                g_pc_reg_handle = rd->handle;
+            }
+            if (!g_sp_reg_handle && (g_ascii_strcasecmp(rd->name, "rsp") == 0 ||
+                                     g_ascii_strcasecmp(rd->name, "sp") == 0 ||
+                                     g_ascii_strcasecmp(rd->name, "r13") == 0)) {
+                g_sp_reg_handle = rd->handle;
+            }
+        }
+    }
+}
+
 uint64_t core_get_pc(void) {
-	uint64_t ret_val;
-	ret_val = qemu_get_register(ARM_V7M_PC);
-	return ret_val;
+    if (!g_pc_reg_handle) {
+        core_init_reg_handles();
+    }
+    if (g_pc_reg_handle) {
+        GByteArray *buf = g_byte_array_sized_new(8);
+        if (qemu_plugin_read_register(g_pc_reg_handle, buf) > 0) {
+            uint64_t val = 0;
+            memcpy(&val, buf->data, MIN(buf->len, sizeof(val)));
+            g_byte_array_free(buf, TRUE);
+            return val;
+        }
+        g_byte_array_free(buf, TRUE);
+    }
+    return qemu_get_register(ARM_V7M_PC);
 }
 
 uint64_t core_get_sp(void) {
-	uint64_t ret_val;
-	ret_val = qemu_get_register(ARM_V7M_SP);
-	return ret_val;
+    if (!g_sp_reg_handle) {
+        core_init_reg_handles();
+    }
+    if (g_sp_reg_handle) {
+        GByteArray *buf = g_byte_array_sized_new(8);
+        if (qemu_plugin_read_register(g_sp_reg_handle, buf) > 0) {
+            uint64_t val = 0;
+            memcpy(&val, buf->data, MIN(buf->len, sizeof(val)));
+            g_byte_array_free(buf, TRUE);
+            return val;
+        }
+        g_byte_array_free(buf, TRUE);
+    }
+    return qemu_get_register(ARM_V7M_SP);
 }
 
 uint64_t core_get_icount(void) {
