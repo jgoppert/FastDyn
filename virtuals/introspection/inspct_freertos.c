@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "inspct.h"
+#include "activity.h"
 
 #ifndef configMAX_TASK_NAME_LEN
 #define configMAX_TASK_NAME_LEN 32
@@ -57,6 +58,8 @@ void inspct_freertos_vTaskSwitchContext(unsigned int cpu_idx, void *arg) {
 
     printf("[FreeRTOS] Switched to Task: %s | Prio: %u | TCB: 0x%08X\n",
            task.task_name, task.priority, task.tcb_addr);
+    inspct_activity_emit("FreeRTOS", "task_switch", task.tcb_addr,
+                         task.task_name, (int32_t)task.priority);
 
 	// Dump the state of every other task sitting in the ready lists
 	uint32_t g_ready_lists_addr = inspct_get_symbol("pxReadyTasksLists");
@@ -75,6 +78,8 @@ void inspct_freertos_prvAddNewTaskToReadyList(unsigned int cpu_idx, void *arg) {
 
     printf("[FreeRTOS] [+] New Task Registered: %s | Prio: %u | TCB: 0x%08X\n",
            task.task_name, task.priority, task.tcb_addr);
+    inspct_activity_emit("FreeRTOS", "task_created", task.tcb_addr,
+                         task.task_name, (int32_t)task.priority);
     fflush(stdout);
 }
 
@@ -96,6 +101,8 @@ void inspct_freertos_vTaskDelay(unsigned int cpu_idx, void *arg) {
     // 3. Log the delay event
     printf("[FreeRTOS] [zZz] Task '%s' (Prio: %u) delaying for %u ticks. TCB: 0x%08X\n",
            task.task_name, task.priority, ticks_to_delay, task.tcb_addr);
+    inspct_activity_emit("FreeRTOS", "task_delayed", task.tcb_addr,
+                         task.task_name, (int32_t)task.priority);
     fflush(stdout);
 }
 

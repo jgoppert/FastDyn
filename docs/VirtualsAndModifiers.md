@@ -125,6 +125,10 @@ are case-sensitive.
 The callback registry can also be extended in C with `virtual_register()`;
 such additions are not automatically available in an unmodified build.
 
+For virtuals that need host-side argument preparation, or for firmware-wide
+modules that generate internal virtuals, see the
+[Virtual and Run Preprocessing SDK](VirtualPreprocessing.md).
+
 ### Virtual examples
 
 Raise IRQ 42 at the firmware's selected trigger address:

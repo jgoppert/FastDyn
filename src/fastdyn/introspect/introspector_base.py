@@ -1,22 +1,26 @@
 from abc import ABC, abstractmethod
 from elftools.elf.elffile import ELFFile
-from fastdyn.fastdyn import *
-from fastdyn.machine import *
-import struct
+from fastdyn.machine import VirtualInstruction
 
 class RTOSIntrospector(ABC):
     # This dictionary acts as our internal Plugin Registry
     _registry = {}
 
-    def __init_subclass__(cls, rtos_name: str, **kwargs):
+    def __init_subclass__(cls, rtos_name: str | None = None, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Automatically register the subclass using the provided RTOS name
-        cls._registry[rtos_name] = cls
+        # Abstract/helper subclasses deliberately omit a name; concrete
+        # implementations register themselves under the detected RTOS name.
+        if rtos_name is not None:
+            cls._registry[rtos_name] = cls
 
     def __init__(self, cpu_obj, symbols, binary):
+        # cpu_obj is retained as a compatibility parameter for external
+        # introspectors. The frontend now collects generated rules from this
+        # object instead of mutating a CPU/frontend object directly.
         self.cpu = cpu_obj
         self.symbols = symbols
         self.binary = binary
+        self.virtuals: list[VirtualInstruction] = []
 
     @abstractmethod
     def setup_hooks(self):
@@ -45,12 +49,18 @@ class RTOSIntrospector(ABC):
                 print(f"[hook] Symbol '{sym_name}' not found")
                 return False
         hook_sym_addr = hook_sym.address if hook_sym else hook_sym_addr
+        # DWARF uses the Thumb-bit-marked function address on Cortex-M while
+        # QEMU's instruction callback keys rules by the aligned instruction
+        # address. ELF-table fallback above already does this; do it for
+        # DWARF-provided function symbols too.
+        if isinstance(hook_sym_addr, int) and hook_sym_addr & 1:
+            hook_sym_addr &= ~1
         cb = VirtualInstruction(
                     at=hook_sym_addr,
                     instruction=f"{sym_name}_Hook",
                     args=[]
                 )
-        self.cpu.add_virtual_instruction(cb)
+        self.virtuals.append(cb)
         print(f"[hook] Successfully registered prologue hook for '{sym_name}' at 0x{hook_sym_addr:x}")
         return True
 
@@ -68,7 +78,7 @@ class RTOSIntrospector(ABC):
                         instruction=f"{epi_name}_Hook",
                         args=[]
                     )
-            self.cpu.add_virtual_instruction(cb)
+            self.virtuals.append(cb)
 
         print(f"[hook] Successfully registered epilogue hook for '{sym_name}' at 0x{hook_sym_addr:x}")
         return True

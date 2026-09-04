@@ -66,6 +66,10 @@ time, uploads the ArduCopter mission, flies it, and exits after final landing.
 - `docs/VirtualsAndModifiers.md`: reference for PC-triggered virtual
   instructions and direct register/memory modifiers, including TOML syntax
   and the built-in virtual callback registry.
+- `docs/VirtualPreprocessing.md`: public SDK for FastDyn-owned virtual and
+  firmware-wide preprocessing, including RTOS introspection.
+- `docs/WritingVirtuals.md`: contributor guide for implementing, registering,
+  testing, and configuring a new native virtual or preprocessing module.
 - `virtuals/physics/README.md`: maintained Rumoca FMI v3 physics path,
   mission assets, timing semantics, and legacy Gazebo notes.
 - `virtuals/physics/flight_controllers/courbet/README.md`: Courbet/ArduPilot

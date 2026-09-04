@@ -69,3 +69,23 @@ QMP, work, and RAM-backing paths.
 renamed Modelica vehicle models through Rumoca FMI v3, checks OptiFuzz dry-run
 wiring for copter/rover/plane, checks two-worker swarm dry-runs, launches real
 two-worker swarms for all three vehicles, and runs the full ArduCopter mission.
+
+## Upstream RTOS introspection smoke test
+
+The scripts below shallow-clone upstream RTOS sources into a temporary
+directory, build an official demo with DWARF symbols, and run the complete
+FastDyn/QEMU introspection path. They do not add RTOS submodules. They need
+the patched QEMU build, `build/libfastdyn.so`, the FastDyn virtual environment,
+and `arm-none-eabi-gcc`:
+
+```bash
+tests/integration/run_freertos_introspection_smoke.sh
+tests/integration/run_threadx_introspection_smoke.sh
+tests/integration/run_rtthread_introspection_smoke.sh
+tests/integration/run_chibios_introspection_smoke.sh
+tests/integration/run_nuttx_introspection_smoke.sh
+```
+
+The NuttX script also bootstraps its upstream build-only utilities
+(`kconfig-frontends` and `genromfs`) in the temporary directory, and creates
+a temporary Python environment for NuttX's ELF post-processing dependencies.

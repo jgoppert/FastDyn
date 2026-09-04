@@ -1,6 +1,6 @@
 from fastdyn.introspect.introspector_base import RTOSIntrospector
 from fastdyn.binary.schema_gen import *
-from fastdyn.fastdyn import *
+from fastdyn import fastdyn_log as fastdyn_log_conf
 import struct
 import logging
 import pathlib
@@ -38,23 +38,23 @@ class ChibiOSIntrospector(RTOSIntrospector, rtos_name="ChibiOS"):
         symbols_to_export = {}
         for sym_name in ["ch_system", "ch_debug"]:
             sym = self.symbols.get(sym_name)
+            address = None
             if sym is None:
-                elf = ELFFile(open(self.binary, 'rb'))
-                for section in elf.iter_sections():
-                    if section.name == ".symtab":
-                        for symbol in section.iter_symbols():
-                            if symbol.name == sym_name:
-                                symbols_to_export[sym_name] = symbol.entry.st_value
-                                # handle thumb bit for arm binaries
-                                if symbols_to_export[sym_name] & 1:
-                                    symbols_to_export[sym_name] &= ~1
-                                break
+                with open(self.binary, "rb") as elf_file:
+                    elf = ELFFile(elf_file)
+                    for section in elf.iter_sections():
+                        if section.name == ".symtab":
+                            for symbol in section.iter_symbols():
+                                if symbol.name == sym_name:
+                                    address = symbol.entry.st_value
+                                    break
             else:
-                symbols_to_export[sym_name] = sym.address
+                address = sym.address
 
-            if symbols_to_export[sym_name] is None:
+            if address is None:
                 log.warning("[ChibiOSIntrospector] Missing symbol '%s' in binary", sym_name)
                 continue
+            symbols_to_export[sym_name] = address & ~1 if address & 1 else address
 
         # Write the schema for fastdyn
         schema_content = generator.generate_schema(target_structs, symbols_to_export)

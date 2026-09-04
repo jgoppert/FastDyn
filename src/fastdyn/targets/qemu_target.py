@@ -14,6 +14,11 @@ import logging
 
 from .. import fastdyn_log as fastdyn_log_conf
 from .. import profiling, timing
+from ..virtual_preprocessing import (
+    VirtualRule,
+    prepare_run_preprocessors,
+    prepare_virtual_rules,
+)
 log = logging.getLogger(__name__)
 fastdyn_log = fastdyn_log_conf.getFastdynLogger()
 
@@ -84,6 +89,26 @@ def _memory_backend_is_file(memory):
     backend = getattr(memory, "memory_backend", None)
     backend_name = getattr(backend, "name", str(backend)).upper()
     return backend_name == "FILE"
+
+
+def _has_nonzero_memory_start(memory):
+    """Whether a memory start address requires a FastDyn QEMU global.
+
+    TOML preserves hexadecimal addresses as strings, so ``"0x0"`` is truthy
+    even though it deliberately means "use the board's default RAM address".
+    This matters for non-Cortex-M boards such as QEMU ``virt`` where a
+    fabricated ``<machine>-soc.ram_baseaddr*`` global is invalid.
+    """
+    memory_start = getattr(memory, "memory_start", None)
+    if memory_start in (None, ""):
+        return False
+
+    try:
+        return int(str(memory_start), 0) != 0
+    except ValueError:
+        # Preserve legacy support for QEMU global values that are not integer
+        # literals; QEMU remains responsible for validating those values.
+        return True
 
 
 def _ensure_memory_backend_file(memory):
@@ -400,19 +425,37 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
     virtuals_path = os.path.join(virtuals_dir, "virtuals.txt")
     modifiers_path = os.path.join(virtuals_dir, "modifiers.txt")
 
-    all_virtuals = []
+    # Direct setup_qemu callers bypass Fastdyn.run, so prepare run-wide
+    # modules here as a compatibility fallback.
+    if not getattr(machine, "preprocessing_prepared", False):
+        prepare_run_preprocessors(machine, out_path)
+
+    raw_virtuals_by_cpu = {id(cpu): [] for cpu in cpus}
     all_modifiers = []
 
     if cpu0.exstng_config_path:
         existing_virtuals, existing_modifiers = _read_existing_config(cpu0.exstng_config_path)
-        all_virtuals.extend(existing_virtuals)
+        raw_virtuals_by_cpu[id(cpu0)].extend(
+            VirtualRule(virtual=line, origin="existing_config")
+            for line in existing_virtuals
+        )
         all_modifiers.extend(existing_modifiers)
 
     for c in cpus:
-        all_virtuals.extend(getattr(c, "virtuals", []) or [])
+        raw_virtuals_by_cpu[id(c)].extend(
+            VirtualRule(virtual=line, origin="user")
+            for line in (getattr(c, "virtuals", []) or [])
+        )
+        raw_virtuals_by_cpu[id(c)].extend(
+            getattr(machine, "generated_virtual_rules", {}).get(id(c), [])
+        )
         all_modifiers.extend(getattr(c, "modifiers", []) or [])
 
-    all_virtuals = _dedup_preserve_order(all_virtuals)
+    all_virtuals = []
+    for c in cpus:
+        all_virtuals.extend(
+            prepare_virtual_rules(c, out_path, raw_virtuals_by_cpu[id(c)])
+        )
     all_modifiers = _dedup_preserve_order(all_modifiers)
 
     log.info(f"Virtual Instructions available at {virtuals_path}")
@@ -432,7 +475,7 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
         f"memory-backend-file,id={main_memory.memory_id},mem-path={main_memory.memory_file},"
         f"size={main_memory.memory_size},share={share_flag}",
     ]
-    if getattr(main_memory, "memory_start", None):
+    if _has_nonzero_memory_start(main_memory):
         main_mem_args.extend([
             "-global",
             f"{cpu0.machine}-soc.ram_baseaddr0={main_memory.memory_start}",
@@ -449,7 +492,7 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
             "-object",
             f"memory-backend-file,id={m.memory_id},mem-path={m.memory_file},size={m.memory_size},share={share_flag}",
         ]
-        if getattr(m, "memory_start", None):
+        if _has_nonzero_memory_start(m):
             extra_mem_args.extend([
                 "-global",
                 f"{cpu0.machine}-soc.ram_baseaddr{idx}={m.memory_start}",
@@ -548,20 +591,6 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
             "  make qemu_path=../qemu PHY=true FLIGHT_CONTROLLERS=true FMU=true"
         )
 
-    # ------------------------ Introspection ------------------------
-    introspection = cpu0.introspect
-    if introspection:
-        introspection_schema = cpu0.introspect_schema
-        schema_path = os.path.join(out_path, "schema.txt")
-        with open(schema_path, "w") as f:
-            f.write(introspection_schema)
-            fastdyn_log.info(f"Introspection Schema Available at: {schema_path}")
-
-        introspect_plugin = [
-            f"introspection={introspection}",
-            f"introspection_schema={schema_path}"
-        ]
-
     plugin_kv = [
         f"{plugin_lib},dev={dev_config_path}",
         f"virtual={virtuals_path}",
@@ -595,6 +624,11 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
             raise ValueError(f"FMU value reference name cannot contain ',' or '=': {name!r}")
         plugin_kv.append(f"fmu_vr_{name}={int(value)}")
 
+    for name, value in sorted(getattr(machine, "runtime_plugin_args", {}).items()):
+        if any(char in name for char in ",=") or "," in str(value):
+            raise ValueError(f"Invalid generated plugin argument: {name!r}")
+        plugin_kv.append(f"{name}={value}")
+
     if opts.probe_run:
         plugin_kv.append(f"probe_run={_bool01(opts.probe_run)}")
     if opts.probe_faults:
@@ -617,9 +651,6 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
         if timer_irq_period_ns <= 0:
             raise ValueError("[Machine].timer_irq_period_ns must be positive")
         plugin_kv.append(f"timer_irq_period_ns={timer_irq_period_ns}")
-
-    if (introspection):
-        plugin_kv.extend(introspect_plugin)
 
     if opts.finline is not None:
         plugin_kv.append(f"finline={opts.finline}")

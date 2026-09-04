@@ -1,5 +1,6 @@
 import os
 from elftools.elf.elffile import ELFFile
+from elftools.dwarf.dwarf_expr import DWARFExprParser
 
 # These match the FieldType enum in your C plugin exactly
 FIELD_UINT32 = 0
@@ -70,7 +71,9 @@ class SchemaGenerator:
 
                 # Get relative offset and convert to absolute
                 if 'DW_AT_data_member_location' in child.attributes:
-                    rel_offset = child.attributes['DW_AT_data_member_location'].value
+                    rel_offset = self._member_offset(
+                        child.attributes['DW_AT_data_member_location'].value
+                    )
                 else:
                     rel_offset = 0 # Sometimes 0 offset is implied
 
@@ -102,6 +105,32 @@ class SchemaGenerator:
                             "type": c_type
                         })
         return fields
+
+    def _member_offset(self, value):
+        """Return a constant DWARF member offset.
+
+        GCC may encode a member offset either as a plain integer or as a
+        DWARF expression such as ``DW_OP_plus_uconst 4``.  The latter is
+        common in ARMv7-A objects (including RT-Thread's upstream QEMU BSP)
+        and pyelftools represents it as a ``ListContainer``.  Schema output
+        is necessarily static, so accept only expressions that evaluate to a
+        single constant and fail clearly for dynamic locations.
+        """
+        if isinstance(value, int):
+            return value
+
+        operations = DWARFExprParser(self.dwarf.structs).parse_expr(value)
+        if len(operations) == 1 and operations[0].op_name in {
+            "DW_OP_plus_uconst",
+            "DW_OP_constu",
+            "DW_OP_consts",
+        }:
+            return int(operations[0].args[0])
+
+        raise ValueError(
+            "Unsupported non-constant DWARF member location: "
+            f"{operations!r}"
+        )
 
     def _get_base_type(self, die):
         """Follows DW_AT_type chains through typedefs/const/volatile to find the actual type."""

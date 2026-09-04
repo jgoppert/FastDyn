@@ -1,6 +1,6 @@
 from fastdyn.introspect.introspector_base import RTOSIntrospector
 from fastdyn.binary.schema_gen import *
-from fastdyn.fastdyn import *
+from fastdyn import fastdyn_log as fastdyn_log_conf
 import struct
 import logging
 import pathlib

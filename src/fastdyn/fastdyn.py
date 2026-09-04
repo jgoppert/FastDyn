@@ -15,8 +15,6 @@ from . import timing
 
 from .utils import parse_config as parse_helper
 
-from fastdyn.introspect.introspect import *
-
 from .machine import VirtualInstruction
 
 from . import fastdyn_log as fastdyn_log_conf
@@ -37,8 +35,17 @@ class Fastdyn:
         return machine
 
     def run(self, target, machine_name, out_path=None):
-        #before running resolve the device models for each machine
         machine = self.machines[machine_name]
+        if target.lower() == "qemu":
+            # Firmware-wide modules (for example RTOS introspection) prepare
+            # declarative virtual rules and plugin arguments here.  The QEMU
+            # target later sends every generated and user rule through the
+            # same per-virtual preparation pipeline.
+            from .virtual_preprocessing import prepare_run_preprocessors
+
+            prepare_run_preprocessors(machine, out_path or "fastdyn_work")
+
+        #before running resolve the device models for each machine
         with timing.phase(f"{machine_name}.compile_device_routing"):
             compile_device_routing(machine.devices, machine.parsed_device, models=machine.models) #return value will be written to machine.parsed_device
 
@@ -156,6 +163,13 @@ class Machine:
         self.ignore_functions: list[str] = []
 
         self.parsed_device = {}            #internal to the machine for qemu understanding
+        self.generated_virtual_rules: dict[int, list] = {}
+        self.runtime_plugin_args: dict[str, str] = {}
+        self.preprocessing_artifacts: list[Path] = []
+        self.preprocessing_prepared: bool = False
+        # Optional native-build or host-provided capabilities consumed by the
+        # public virtual preprocessing SDK (for example, "fuzzing" or "fmu").
+        self.virtual_capabilities: set[str] = set()
 
     def add_cpu(self, arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, introspect, exstng_config_path):
         cpu = CPU(arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, introspect, exstng_config_path, self) #pass parent for easy referencing to objs like irq_map
@@ -292,8 +306,8 @@ class CPU:
                                             """
         self.symbol_dict = {}
 
-        if self.introspect:
-             self.introspect_schema = self.add_introspection()
+        # Populated by the introspection run preprocessor when enabled.
+        self.introspect_schema = ""
 
 
     def add_virtual_instruction(self, vi: Union["VirtualInstruction", str, Sequence[Union["VirtualInstruction", str]]]) -> bool:
@@ -306,13 +320,11 @@ class CPU:
                 fastdyn_log.error("Unable to parse Virtual Instruction")
                 return False
 
-            try:
-                resolved = parse_helper.resolve_vi(parsed, symbol_map=self.symbol_dict, irq_map=self.machine_obj.irq_map)
-            except Exception as e:
-                fastdyn_log.error(f"Unable to resolve Virtual Instruction: {e}")
-                return False
-
-            out.append(parse_helper.vi_to_string(resolved))
+            # Keep rules declarative until run preparation. This preserves the
+            # original arguments for a virtual-specific preprocessor (for
+            # example, symbolic Cortex-M IRQ names) and makes user-generated
+            # and run-generated rules share one pipeline.
+            out.append(parse_helper.vi_to_string(parsed))
 
         self.virtuals.extend(out)
         return True
@@ -351,15 +363,6 @@ class CPU:
         except (AttributeError, TypeError, ValueError) as e:
             fastdyn_log.error(f"Unable to set '{param}' to {val!r}: {e}")
             return False
-
-    def add_introspection(self):
-        schema_content = ""
-        if self.introspect:
-            schema_content = introspect_rtos(self, self.binary)
-
-        fastdyn_log.info(f"Introspection Schema:\n{schema_content}")
-
-        return schema_content
 
 @dataclass
 class DeviceHandler:

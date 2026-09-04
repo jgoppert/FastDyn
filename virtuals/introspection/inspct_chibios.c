@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include "inspct.h"
+#include "activity.h"
 #include "virtuals.h"
 
 #define CHIBIOS_TASK_NAME_MAX 32
@@ -91,6 +92,8 @@ void inspct_chibios_trace_switch(unsigned int cpu_idx, void *arg) {
            in_task.name[0] ? in_task.name : "(null)",
            (unsigned)in_task.priority,
            ntp, otp);
+    inspct_activity_emit("ChibiOS", "task_switch", in_task.thread_addr,
+                         in_task.name, (int32_t)in_task.priority);
 
     // if new name add to all_threads
     bool found = false;
@@ -156,6 +159,8 @@ void inspct_chibios_thd_object_init(unsigned int cpu_idx, void *arg) {
            task.name[0] ? task.name : "(null)",
            (unsigned)task.priority,
            tp);
+    inspct_activity_emit("ChibiOS", "task_created", task.thread_addr,
+                         task.name, (int32_t)task.priority);
     fflush(stdout);
 }
 
