@@ -133,6 +133,12 @@ existing_config_path = "virtuals/physics/flight_controllers/courbet/copter462/un
 
 FastDyn supports inline instruction modifiers under `[[CPU.cpu0.modifiers]]` to patch register states (such as redirecting `PC`/`RIP` execution flow or overriding register values) dynamically when QEMU executes a specific target address.
 
+Virtual instructions use the adjacent `[[CPU.cpu0.virtuals]]` TOML array to
+invoke a named FastDyn action when QEMU executes a target address (for example,
+raise an IRQ). See [Virtual Instructions and Modifiers](VirtualsAndModifiers.md)
+for the complete syntax, built-in virtual registry, argument formats, and the
+callback-versus-inline implementation distinction.
+
 ```toml
 # x86_64 Example
 [[CPU.cpu0.modifiers]]

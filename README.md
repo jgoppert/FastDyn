@@ -63,6 +63,9 @@ time, uploads the ArduCopter mission, flies it, and exits after final landing.
 
 - `docs/Configuration.md`: FastDyn TOML reference for QEMU, FMU, Rumoca,
   helper processes, profiling, and swarm options.
+- `docs/VirtualsAndModifiers.md`: reference for PC-triggered virtual
+  instructions and direct register/memory modifiers, including TOML syntax
+  and the built-in virtual callback registry.
 - `virtuals/physics/README.md`: maintained Rumoca FMI v3 physics path,
   mission assets, timing semantics, and legacy Gazebo notes.
 - `virtuals/physics/flight_controllers/courbet/README.md`: Courbet/ArduPilot
