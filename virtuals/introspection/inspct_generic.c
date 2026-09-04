@@ -8,6 +8,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "inspct.h"
 #include "activity.h"
@@ -22,13 +23,17 @@ static uint32_t read_pointer(uint32_t address) {
 }
 
 static void report_event(const char *rtos, const char *event, uint32_t task) {
-    if (task != 0) {
-        printf("[%s] %s | current task=0x%08X\n", rtos, event, task);
-    } else {
-        printf("[%s] %s\n", rtos, event);
+    /* Switches can be extremely frequent. They belong in the structured
+     * activity stream, not in the terminal's unbounded human log. */
+    if (strcmp(event, "task_switch") != 0) {
+        if (task != 0) {
+            printf("[%s] %s | current task=0x%08X\n", rtos, event, task);
+        } else {
+            printf("[%s] %s\n", rtos, event);
+        }
+        fflush(stdout);
     }
     inspct_activity_emit(rtos, event, task, NULL, -1);
-    fflush(stdout);
 }
 
 static uint32_t zephyr_current(void) {
@@ -39,6 +44,55 @@ static uint32_t zephyr_current(void) {
         inspct_get_field("_cpu", kernel, "current", &current);
     }
     return current;
+}
+
+static void report_zephyr_switch(void) {
+    uint32_t task = zephyr_current();
+    char name[33] = {0};
+    uint8_t state = 0;
+    int32_t priority = -1;
+    InspctActivityField fields[7];
+    size_t field_count = 0;
+
+    if (task == 0) {
+        inspct_activity_emit_task("Zephyr", "task_switch", 0, NULL, -1, -1);
+        return;
+    }
+    /* k_thread is emitted by the Zephyr Python adapter from DWARF. The
+     * fields are optional across Zephyr configurations, so an absent layout
+     * simply leaves the corresponding inspector value unavailable. */
+    (void)inspct_get_field("k_thread", task, "name", name);
+    (void)inspct_get_field("k_thread", task, "base.thread_state", &state);
+    {
+        uint8_t raw_priority = 0;
+        if (inspct_get_field("k_thread", task, "base.prio", &raw_priority)) {
+            priority = raw_priority;
+        }
+    }
+#define ZEPHYR_TASK_FIELD(field_name)                                           \
+    do {                                                                        \
+        uint32_t value = 0;                                                     \
+        if (inspct_get_field("k_thread", task, field_name, &value) &&          \
+            field_count < sizeof(fields) / sizeof(fields[0])) {                 \
+            fields[field_count++] = (InspctActivityField){field_name, value};   \
+        }                                                                       \
+    } while (0)
+    /* These are decoded from the generated k_thread DWARF schema.  The
+     * inspector intentionally captures semantic fields, not an opaque TCB
+     * memory dump.  A missing field is simply omitted for that Zephyr build. */
+    ZEPHYR_TASK_FIELD("base.prio");
+    ZEPHYR_TASK_FIELD("base.thread_state");
+    ZEPHYR_TASK_FIELD("base.user_options");
+    ZEPHYR_TASK_FIELD("base.sched_locked");
+    ZEPHYR_TASK_FIELD("base.preempt");
+    ZEPHYR_TASK_FIELD("base.timeout.dticks");
+    ZEPHYR_TASK_FIELD("orig_prio");
+    /* Pointers intentionally stay out of this user-facing snapshot.  The
+     * monitor presents inspectable kernel state, not opaque addresses. */
+#undef ZEPHYR_TASK_FIELD
+    inspct_activity_emit_task_fields("Zephyr", "task_switch", task,
+                                     name[0] ? name : NULL, priority, state,
+                                     fields, field_count);
 }
 
 static uint32_t global_current(const char *symbol) {
@@ -56,7 +110,7 @@ static uint32_t rtthread_current(void) {
 
 void inspct_zephyr_event(unsigned int cpu_index, void *arg) {
     (void)cpu_index; (void)arg;
-    report_event("Zephyr", "scheduler event", zephyr_current());
+    report_zephyr_switch();
 }
 
 void inspct_threadx_event(unsigned int cpu_index, void *arg) {
@@ -78,9 +132,17 @@ void inspct_nuttx_event(unsigned int cpu_index, void *arg) {
 
 int inspct_generic_init(int argc, char **argv) {
     (void)argc; (void)argv;
-    virtual_register("z_swap_Hook", inspct_zephyr_event);
-    virtual_register("z_sched_yield_Hook", inspct_zephyr_event);
-    virtual_register("z_setup_new_thread_Hook", inspct_zephyr_event);
+    virtual_register("z_arm_pendsv_epi_Hook", inspct_zephyr_event);
+    virtual_register("z_riscv_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("z_arm_context_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("z_arm64_context_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("z_openrisc_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("z_sparc_context_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("_z_rx_arch_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("arch_swap_epi_Hook", inspct_zephyr_event);
+    virtual_register("z_arc_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("_rirq_newthread_switch_epi_Hook", inspct_zephyr_event);
+    virtual_register("_firq_exit_epi_Hook", inspct_zephyr_event);
     virtual_register("_tx_thread_schedule_Hook", inspct_threadx_event);
     virtual_register("_tx_thread_system_return_Hook", inspct_threadx_event);
     virtual_register("_tx_thread_create_Hook", inspct_threadx_event);

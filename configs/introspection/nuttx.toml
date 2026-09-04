@@ -1,0 +1,38 @@
+# Apache NuttX qemu-armv7a:nsh image using the committed debug-symbol fixture.
+[Machine]
+platform = "generic-armv7a"
+qemu_path = "../qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-nuttx-introspection.qmp"
+log_options = "none"
+reset_memory_files = true
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x0"
+memory_size = "16M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-nuttx-introspection.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "virt"
+cpu = "cortex-a7"
+binary = "tests/binaries/rtos/nuttx.elf"
+plugin_library = "build/libfastdyn.so"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
+
+[CPU.cpu0.plugins.introspection.activity_monitor]
+enabled = true
+port = 8770
+open_browser = true

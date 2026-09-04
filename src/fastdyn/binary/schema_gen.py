@@ -66,8 +66,14 @@ class SchemaGenerator:
 
         for child in struct_die.iter_children():
             if child.tag == 'DW_TAG_member':
-                field_name = child.attributes['DW_AT_name'].value.decode('utf-8')
-                full_name = f"{prefix}{field_name}"
+                name_attribute = child.attributes.get('DW_AT_name')
+                # Anonymous C structs/unions are common in modern RTOS task
+                # control blocks. They have no field name of their own, but
+                # their named children still form useful inspectable fields.
+                field_name = (
+                    name_attribute.value.decode('utf-8') if name_attribute else ""
+                )
+                full_name = f"{prefix}{field_name}".replace("..", ".")
 
                 # Get relative offset and convert to absolute
                 if 'DW_AT_data_member_location' in child.attributes:
@@ -90,10 +96,18 @@ class SchemaGenerator:
                         # Follow typedefs to the base type
                         base_die = self._get_base_type(target_die)
 
-                        if base_die and base_die.tag == 'DW_TAG_structure_type':
+                        if base_die and base_die.tag in {
+                            'DW_TAG_structure_type', 'DW_TAG_union_type'
+                        }:
                             # It's an inline nested struct! Recurse.
-                            nested = self._flatten_struct(base_die, f"{full_name}.", abs_offset)
+                            nested_prefix = f"{full_name}." if full_name else prefix
+                            nested = self._flatten_struct(base_die, nested_prefix, abs_offset)
                             fields.extend(nested)
+                            continue
+
+                        # A nameless scalar member is padding or an unnamed
+                        # implementation detail with no stable UI label.
+                        if not full_name:
                             continue
 
                         # Map to C Plugin FieldType

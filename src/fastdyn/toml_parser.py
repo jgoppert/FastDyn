@@ -305,6 +305,27 @@ def parser(out_dir, machine_name, toml_config, svd_path, fmu_name=None, load_fmu
         cpu_obj.log_options     =   toml_parser.machine_info.get("log_options", curr_cpu.get("log_options", cpu_obj.log_options))
         cpu_obj.logger_content  =   curr_cpu.get("logger_content", cpu_obj.logger_content)
 
+        # Run-wide modules are configured under a generic per-CPU namespace.
+        # FastDyn preserves the table without knowing plugin names or their
+        # settings. ``introspect = true`` remains a compatibility spelling for
+        # the built-in introspection module's enabled setting.
+        raw_plugins = curr_cpu.get("plugins", {})
+        if not isinstance(raw_plugins, dict):
+            raise TypeError("[CPU.cpu0.plugins] must be a table")
+        plugin_config: dict[str, dict] = {}
+        for plugin_name, plugin_settings in raw_plugins.items():
+            if not isinstance(plugin_settings, dict):
+                raise TypeError(
+                    f"[CPU.cpu0.plugins.{plugin_name}] must be a table"
+                )
+            plugin_config[str(plugin_name)] = dict(plugin_settings)
+        if bool(curr_cpu.get("introspect", False)):
+            plugin_config.setdefault("introspection", {}).setdefault("enabled", True)
+        cpu_obj.plugin_config = plugin_config
+        cpu_obj.introspect = bool(
+            plugin_config.get("introspection", {}).get("enabled", False)
+        )
+
         #symbol resolution per cpu
 		#if curr_cpu.get("map_file") is not None:
 		#	cpu_obj.add_map_file(curr_cpu.get("map_file"))

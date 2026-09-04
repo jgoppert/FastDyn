@@ -1,0 +1,39 @@
+# ThreadX Cortex-M4 sample using the committed debug-symbol fixture.
+[Machine]
+platform = "generic-cortexm"
+qemu_path = "../qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-threadx-introspection.qmp"
+log_options = "none"
+reset_memory_files = true
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "8M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-threadx-introspection.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "cortexm"
+cpu = "cortex-m4"
+binary = "tests/binaries/rtos/threadx.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
+
+[CPU.cpu0.plugins.introspection.activity_monitor]
+enabled = true
+port = 8768
+open_browser = true

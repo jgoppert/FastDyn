@@ -9,7 +9,7 @@ There are two separate extension points:
 
 - A **virtual preprocessor** prepares one configured virtual instruction.
 - A **run preprocessor** prepares a firmware-wide feature that may generate
-  internal virtual instructions, artifacts, and plugin arguments.
+  internal virtual instructions and artifacts.
 
 The public API is [`fastdyn.virtual_preprocessing`](../src/fastdyn/virtual_preprocessing.py).
 For a start-to-finish contributor recipe, including the native C callback and
@@ -23,7 +23,7 @@ TOML / existing virtuals.txt
              v
 run preprocessors (enabled firmware-wide modules)
              |
-             +--> generated virtual rules, artifacts, plugin arguments
+             +--> generated virtual rules and artifacts
              v
 user and generated rules combined
              |
@@ -116,10 +116,7 @@ class ExampleRunPreprocessor:
     def prepare(self, ctx: RunContext) -> RunPrepareResult:
         schema = ctx.artifact_path("example/schema.txt")
         schema.write_text("schema", encoding="utf-8")
-        return RunPrepareResult(
-            plugin_args={"example_schema": str(schema)},
-            artifacts=[schema],
-        )
+        return RunPrepareResult(artifacts=[schema])
 
 
 register_run_preprocessor(
@@ -132,7 +129,33 @@ register_run_preprocessor(
 ```
 
 The module owns its enablement predicate. The generic frontend evaluates every
-registered `RunDefinition`; it does not branch on a feature name.
+registered `RunDefinition`; it does not branch on a feature name. Each
+`RunContext` contains that module's TOML `settings`, a namespaced
+`plugin_artifact_path()` allocator, a FastDyn `logger`, and a generic cleanup
+list in `RunPrepareResult` for resources started during preparation.
+
+Use the generic TOML namespace for a run module:
+
+```toml
+[CPU.cpu0.plugins.example]
+enabled = true
+```
+
+FastDyn carries this table to the module without interpreting `example` or its
+keys. It does not expose module-specific CLI options.
+
+### Runtime configuration boundary
+
+Run preprocessors have no API for adding QEMU `--plugin` arguments. This is a
+hard boundary: a module cannot extend FastDyn's command line, including by
+returning a prepared result. User-controlled feature settings belong in TOML;
+preprocessors may turn those settings into artifacts.
+
+Native modules obtain artifacts through FastDyn's generic run-artifact API,
+addressed by a logical relative name such as `introspection/schema.txt`. The
+frontend manages the actual work directory, and no generated path is passed as
+a command-line option. This keeps the QEMU launch surface owned solely by
+FastDyn.
 
 ## RTOS introspection
 
@@ -143,10 +166,13 @@ RTOS introspection is the first run-wide implementation of this SDK. When
 2. resolves RTOS hook locations;
 3. creates an introspection schema artifact;
 4. emits the internal hook virtual rules; and
-5. supplies the `introspection` and `introspection_schema` plugin arguments.
+5. writes its schema and activity artifacts below the FastDyn-managed run
+   artifact root.
 
 The RTOS-specific hook names remain inside the FastDyn introspection module;
-the generic frontend only receives a declarative `RunPrepareResult`.
+the generic frontend only receives a declarative `RunPrepareResult`. Native
+introspection resolves those artifacts through the generic run-artifact API;
+it receives no `introspection_*` QEMU plugin option.
 
 FreeRTOS and ChibiOS provide task-aware native walkers. Zephyr, ThreadX,
 RT-Thread, and NuttX provide schema-backed scheduler and task-lifecycle event

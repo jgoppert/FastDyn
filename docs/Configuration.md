@@ -129,6 +129,24 @@ introspect = false
 existing_config_path = "virtuals/physics/flight_controllers/courbet/copter462/unlabeled_conf"
 ```
 
+`introspect = true` is retained as a compatibility shorthand. New run modules
+use FastDyn's generic per-CPU plugin configuration namespace instead:
+
+```toml
+[CPU.cpu0.plugins.introspection]
+enabled = true
+
+[CPU.cpu0.plugins.introspection.activity_monitor]
+enabled = true
+port = 8765
+open_browser = true
+```
+
+FastDyn preserves each `plugins.<name>` table without interpreting the plugin
+name or settings. The selected module receives only its TOML settings, the
+uniform FastDyn logger, lifecycle cleanup registration, and a private artifact
+folder. It cannot add QEMU command-line options.
+
 ### Instruction Modifiers
 
 FastDyn supports inline instruction modifiers under `[[CPU.cpu0.modifiers]]` to patch register states (such as redirecting `PC`/`RIP` execution flow or overriding register values) dynamically when QEMU executes a specific target address.

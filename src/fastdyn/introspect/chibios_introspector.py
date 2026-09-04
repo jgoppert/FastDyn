@@ -16,6 +16,13 @@ class ChibiOSIntrospector(RTOSIntrospector, rtos_name="ChibiOS"):
 
         self.register_prologue_hook("__port_switch")
         self.register_prologue_hook("__thd_object_init")
+        for hook in (
+            "chSemObjectInit", "chMtxObjectInit", "chVTObjectInit",
+            "chSemWaitTimeout", "chSemSignal", "chMtxLock", "chMtxUnlock",
+            "chVTSet", "chVTReset",
+            "chMBObjectInit", "chMBPostTimeout", "chMBFetchTimeout",
+        ):
+            self.register_prologue_hook(hook)
 
         # Generate the schema FastDyn needs. These struct names must match the
         # DWARF type names produced by the ChibiOS build:

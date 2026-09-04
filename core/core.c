@@ -29,6 +29,7 @@ int isdigit(int c);
 #include <qemu/qemu-plugin.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,6 +70,8 @@ twintrace_mode_t twintrace_mode = TT_OFF;
 const char *twintrace_bin_path = NULL;
 int introspection_enabled = 0;
 const char *introspection_schema_path = NULL;
+static char run_artifacts_root[PATH_MAX];
+static char introspection_schema_buffer[PATH_MAX];
 
 /**
  * @brief Parses a token string into a logger entry.
@@ -1155,37 +1158,66 @@ static void parse_twintrace_args(int argc, char **argv)
             // twintrace_bin_path ? twintrace_bin_path : "(none)");
 }
 
-void parse_introspect_args(int argc, char **argv) {
-    const char *intro = utils_get_arg("introspection", argc, argv);
-    const char *schema = utils_get_arg("introspection_schema", argc, argv);
-    
-    intro = safe_arg(intro);
-    schema = safe_arg(schema);
+static void core_init_run_artifacts_root(int argc, char **argv) {
+    const char *virtual_rules = utils_get_arg("virtual", argc, argv);
+    char resolved[PATH_MAX];
+    char *separator;
 
+    run_artifacts_root[0] = '\0';
+    if (!virtual_rules || !virtual_rules[0]) {
+        return;
+    }
+    if (!realpath(virtual_rules, resolved)) {
+        if (snprintf(resolved, sizeof(resolved), "%s", virtual_rules) >= (int)sizeof(resolved)) {
+            return;
+        }
+    }
+
+    /* ``.../<workdir>/virtuals/virtuals.txt`` -> ``.../<workdir>``. */
+    separator = strrchr(resolved, '/');
+    if (!separator) {
+        return;
+    }
+    *separator = '\0';
+    separator = strrchr(resolved, '/');
+    if (!separator) {
+        return;
+    }
+    *separator = '\0';
+    if (snprintf(run_artifacts_root, sizeof(run_artifacts_root), "%s/run-artifacts", resolved)
+        >= (int)sizeof(run_artifacts_root)) {
+        run_artifacts_root[0] = '\0';
+    }
+}
+
+int core_get_run_artifact_path(const char *relative, char *out, size_t out_size) {
+    if (!relative || !relative[0] || !out || out_size == 0 || !run_artifacts_root[0]
+        || relative[0] == '/' || strstr(relative, "..")) {
+        return -1;
+    }
+    if (snprintf(out, out_size, "%s/%s", run_artifacts_root, relative) >= (int)out_size) {
+        return -1;
+    }
+    return 0;
+}
+
+static void prepare_introspection(int argc, char **argv) {
+    core_init_run_artifacts_root(argc, argv);
     introspection_enabled = 0;
     introspection_schema_path = NULL;
 
-    if (intro) {
-        if (!strcasecmp(intro, "true") || !strcasecmp(intro, "on") || !strcmp(intro, "1")) {
-            introspection_enabled = 1;
-        } else if (!strcasecmp(intro, "false") || !strcasecmp(intro, "off") || !strcmp(intro, "0") || !strcasecmp(intro, "none")) {
-            introspection_enabled = 0;
-        } else {
-            fprintf(stderr, "fastdyn: unknown introspection mode: '%s'\n", intro);
-            utils_die("bad introspection mode");
-        }
+    /* The Python feature is enabled only from TOML.  If it prepared its
+     * schema artifact, the native component finds it through the generic run
+     * artifact API; no feature-specific QEMU option is accepted here. */
+    if (core_get_run_artifact_path("introspection/schema.txt",
+                                   introspection_schema_buffer,
+                                   sizeof(introspection_schema_buffer)) == 0
+        && access(introspection_schema_buffer, R_OK) == 0) {
+        introspection_enabled = 1;
+        introspection_schema_path = introspection_schema_buffer;
     }
 
-    if (introspection_enabled) {
-        if (!schema || !strcasecmp(schema, "none")) {
-            utils_die("fastdyn: introspection enabled but introspection_schema is missing");
-        }
-        introspection_schema_path = schema;
-    }
-
-    // Forward the parsed schema path to virtuals_init
     virtuals_init(argc, argv, introspection_schema_path);
-    
 }
 
 void parse_rules_file(const char *filename);
@@ -1248,9 +1280,8 @@ static void print_rules(void) {
 #endif
 static int core_parse_arguments(int argc, char ** argv) {
 
-	//parse args for introspection
-	//TODO: Fix this dubmass design
-    parse_introspect_args(argc, argv);
+	/* Run-wide components obtain only FastDyn-managed artifacts. */
+    prepare_introspection(argc, argv);
 	const char *filename= utils_get_arg("detour", argc, argv);
     if (filename) {
             num_tuples = read_tuples_from_file(filename, address_tuples, MAX_TUPLES);

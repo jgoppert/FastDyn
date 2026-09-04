@@ -141,117 +141,46 @@ def cli():
     default=False,
     help='Do not start helper processes from [Rumoca] or [Run.processes].'
 )
-@click.option(
-    '--activity-monitor/--no-activity-monitor',
-    default=False,
-    show_default=True,
-    help='Serve the live RTOS introspection activity view during this run.'
-)
-@click.option(
-    '--activity-monitor-port',
-    default=8765,
-    show_default=True,
-    type=click.IntRange(1, 65535),
-    help='Local HTTP port for --activity-monitor.'
-)
-@click.option(
-    '--open-activity-monitor',
-    is_flag=True,
-    default=False,
-    help='Open the activity monitor in the default browser when it starts.'
-)
 def run(config, map_file, work_dir, svd, persist_work_dir, fmu, no_build_fmu,
-        no_run_processes, activity_monitor, activity_monitor_port,
-        open_activity_monitor):
+        no_run_processes):
     work_dir = _prepare_work_dir(work_dir, persist_work_dir)
     _configure_measurement(config, work_dir)
 
     svd_path = svd if svd is not None else "third_party/common/cmsis-svd-data"
-    activity_server = None
-    if activity_monitor:
-        from .activity_monitor import start_activity_monitor
-        try:
-            activity_server, _activity_thread, activity_url = start_activity_monitor(
-                work_dir, port=activity_monitor_port, open_browser=open_activity_monitor
-            )
-        except OSError as exc:
-            raise click.ClickException(
-                f"Unable to start activity monitor on 127.0.0.1:{activity_monitor_port}: {exc}"
-            ) from exc
-        click.echo(f"FastDyn activity monitor: {activity_url}")
-
     try:
-        try:
-            with timing.phase("fastdyn.run.total", config=config, work_dir=work_dir):
-                with timing.phase("fastdyn.fmu_auto_build"):
-                    _auto_build_fmu(config, fmu, no_build_fmu)
+        with timing.phase("fastdyn.run.total", config=config, work_dir=work_dir):
+            with timing.phase("fastdyn.fmu_auto_build"):
+                _auto_build_fmu(config, fmu, no_build_fmu)
 
-                with runtime_config.launch_from_config(config, work_dir, skip=no_run_processes) as process_manager:
-                    with timing.phase("fastdyn.parse_config"):
-                        fastdyn_handle = toml_parser.parser(
-                            work_dir,
-                            machine_name="machine0",
-                            toml_config=config,
-                            svd_path=svd_path,
-                            fmu_name=fmu,
-                        )
+            with runtime_config.launch_from_config(config, work_dir, skip=no_run_processes) as process_manager:
+                with timing.phase("fastdyn.parse_config"):
+                    fastdyn_handle = toml_parser.parser(
+                        work_dir,
+                        machine_name="machine0",
+                        toml_config=config,
+                        svd_path=svd_path,
+                        fmu_name=fmu,
+                    )
 
+                if process_manager is not None:
+                    process_manager.start_terminator_watcher(
+                        lambda _handle, _exit_code: fastdyn_handle.shutdown()
+                    )
+
+                try:
+                    for idx, machine in enumerate(fastdyn_handle.machines):
+                        with timing.phase(f"fastdyn.machine{idx}.run"):
+                            fastdyn_handle.run(
+                                machine_name=f"machine{idx}",
+                                target="qemu",
+                                out_path=work_dir,
+                            )
+                finally:
                     if process_manager is not None:
-                        process_manager.start_terminator_watcher(
-                            lambda _handle, _exit_code: fastdyn_handle.shutdown()
-                        )
-
-                    try:
-                        for idx, machine in enumerate(fastdyn_handle.machines):
-                            with timing.phase(f"fastdyn.machine{idx}.run"):
-                                fastdyn_handle.run(
-                                    machine_name=f"machine{idx}",
-                                    target="qemu",
-                                    out_path=work_dir,
-                                )
-                    finally:
-                        if process_manager is not None:
-                            process_manager.stop_terminator_watcher()
-                            process_manager.raise_for_terminator_failure()
-        except runtime_config.RuntimeConfigError as exc:
-            raise click.ClickException(str(exc)) from exc
-    finally:
-        if activity_server is not None:
-            activity_server.shutdown()
-            activity_server.server_close()
-
-
-@cli.command('activity-monitor', help='Serve a browser view of an introspection activity artifact.')
-@click.option('--run-dir', default='./fastdyn_work', show_default=True,
-              type=click.Path(resolve_path=True, file_okay=False), metavar='PATH',
-              help='FastDyn work directory containing run-artifacts/introspection/activity.jsonl.')
-@click.option('--host', default='127.0.0.1', show_default=True,
-              help='Interface to bind. Use 127.0.0.1 unless remote access is intended.')
-@click.option('--port', default=8765, show_default=True, type=click.IntRange(1, 65535),
-              help='HTTP port for the activity monitor.')
-@click.option('--open-browser', is_flag=True, default=False,
-              help='Open the monitor in the default browser.')
-def activity_monitor(run_dir, host, port, open_browser):
-    """Keep serving activity from a live or completed FastDyn run."""
-    from .activity_monitor import activity_log_path, create_activity_server
-    import webbrowser
-
-    try:
-        server = create_activity_server(run_dir, host=host, port=port)
-    except OSError as exc:
-        raise click.ClickException(f"Unable to start activity monitor: {exc}") from exc
-
-    url = f"http://{host}:{server.server_port}/"
-    click.echo(f"FastDyn activity monitor: {url}")
-    click.echo(f"Activity log: {activity_log_path(run_dir)}")
-    if open_browser:
-        webbrowser.open(url)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+                        process_manager.stop_terminator_watcher()
+                        process_manager.raise_for_terminator_failure()
+    except runtime_config.RuntimeConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _resolve_probe_addresses(cache_dir, symbols_list):

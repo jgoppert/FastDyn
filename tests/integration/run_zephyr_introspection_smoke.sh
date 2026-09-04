@@ -33,7 +33,7 @@ git clone --depth 1 https://github.com/zephyrproject-rtos/zephyr.git "$smoke_dir
     "$python_bin" -m west update cmsis cmsis_6
 )
 
-cmake -S "$smoke_dir/zephyr/samples/synchronization" -B "$smoke_dir/build" -GNinja \
+ZEPHYR_BASE="$smoke_dir/zephyr" cmake -S "$smoke_dir/zephyr/samples/synchronization" -B "$smoke_dir/build" -GNinja \
     -DBOARD=qemu_cortex_m3 \
     -DZephyr_DIR="$smoke_dir/zephyr/share/zephyr-package/cmake" \
     -DZEPHYR_TOOLCHAIN_VARIANT=gnuarmemb \
@@ -66,7 +66,7 @@ share = true
 [CPU]
 [[CPU.cpu0]]
 arch = "arm"
-machine = "cortexm"
+machine = "lm3s6965evb"
 cpu = "cortex-m3"
 binary = "$smoke_dir/build/zephyr/zephyr.elf"
 plugin_library = "$plugin_lib"
@@ -84,7 +84,9 @@ if [[ $status -ne 0 && $status -ne 124 ]]; then
     cat "$smoke_dir/fastdyn.log" >&2
     exit "$status"
 fi
-grep -q '\[Zephyr\] scheduler event' "$smoke_dir/fastdyn.log"
-grep -q 'z_sched_yield_Hook' "$smoke_dir/work/virtuals/virtuals.txt"
+grep -q 'z_arm_pendsv_epi_Hook' "$smoke_dir/work/virtuals/virtuals.txt"
 grep -q 'SYMBOL _kernel' "$smoke_dir/work/run-artifacts/introspection/schema.txt"
+grep -q '"event":"task_switch"' "$smoke_dir/work/run-artifacts/introspection/activity.jsonl"
+grep -q '"event":"resource_' "$smoke_dir/work/run-artifacts/introspection/activity.jsonl"
+test "$(wc -l < "$smoke_dir/work/run-artifacts/introspection/activity.jsonl")" -ge 10
 echo "Zephyr FastDyn introspection smoke test passed"

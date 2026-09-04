@@ -61,6 +61,10 @@ time, uploads the ArduCopter mission, flies it, and exits after final landing.
 
 ## Documentation Map
 
+For a directly runnable RTOS introspection demonstration using the bundled
+debug-symbol FreeRTOS ELF, see
+[`configs/introspection/freertos.toml`](configs/introspection/freertos.toml).
+
 - `docs/Configuration.md`: FastDyn TOML reference for QEMU, FMU, Rumoca,
   helper processes, profiling, and swarm options.
 - `docs/VirtualsAndModifiers.md`: reference for PC-triggered virtual
@@ -68,6 +72,8 @@ time, uploads the ArduCopter mission, flies it, and exits after final landing.
   and the built-in virtual callback registry.
 - `docs/VirtualPreprocessing.md`: public SDK for FastDyn-owned virtual and
   firmware-wide preprocessing, including RTOS introspection.
+- `docs/IntrospectionExamples.md`: directly runnable RTOS introspection
+  configurations and their bundled debug-symbol test binaries.
 - `docs/WritingVirtuals.md`: contributor guide for implementing, registering,
   testing, and configuring a new native virtual or preprocessing module.
 - `virtuals/physics/README.md`: maintained Rumoca FMI v3 physics path,

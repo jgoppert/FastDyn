@@ -475,7 +475,11 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
         f"memory-backend-file,id={main_memory.memory_id},mem-path={main_memory.memory_file},"
         f"size={main_memory.memory_size},share={share_flag}",
     ]
-    if _has_nonzero_memory_start(main_memory):
+    # ram_baseaddr* is a FastDyn generic Cortex-M SoC property. Board models
+    # (for example Zephyr's lm3s6965evb target) own their fixed RAM mapping
+    # and reject that synthetic global option.
+    is_generic_cortexm = str(getattr(cpu0, "machine", "")).lower() in {"cortexm", "cortexm7"}
+    if is_generic_cortexm and _has_nonzero_memory_start(main_memory):
         main_mem_args.extend([
             "-global",
             f"{cpu0.machine}-soc.ram_baseaddr0={main_memory.memory_start}",
@@ -492,7 +496,7 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
             "-object",
             f"memory-backend-file,id={m.memory_id},mem-path={m.memory_file},size={m.memory_size},share={share_flag}",
         ]
-        if _has_nonzero_memory_start(m):
+        if is_generic_cortexm and _has_nonzero_memory_start(m):
             extra_mem_args.extend([
                 "-global",
                 f"{cpu0.machine}-soc.ram_baseaddr{idx}={m.memory_start}",
@@ -623,11 +627,6 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
         if "," in name or "=" in name:
             raise ValueError(f"FMU value reference name cannot contain ',' or '=': {name!r}")
         plugin_kv.append(f"fmu_vr_{name}={int(value)}")
-
-    for name, value in sorted(getattr(machine, "runtime_plugin_args", {}).items()):
-        if any(char in name for char in ",=") or "," in str(value):
-            raise ValueError(f"Invalid generated plugin argument: {name!r}")
-        plugin_kv.append(f"{name}={value}")
 
     if opts.probe_run:
         plugin_kv.append(f"probe_run={_bool01(opts.probe_run)}")

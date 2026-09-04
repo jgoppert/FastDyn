@@ -16,6 +16,10 @@ class FreeRTOSIntrospector(RTOSIntrospector, rtos_name="FreeRTOS"):
         self.register_prologue_hook('vTaskSwitchContext')
         self.register_prologue_hook('prvAddNewTaskToReadyList')
         self.register_epilogue_hook('xQueueGenericCreate')
+        self.register_epilogue_hook('xTimerCreate')
+        self.register_prologue_hook('xQueueSemaphoreTake')
+        self.register_prologue_hook('xQueueGenericSend')
+        self.register_prologue_hook('xTimerGenericCommand')
 
         # TODO: remove hardcoding requirements, i think the registeration function can return which symbols/structs need to be exported.
         # Pass the structs you know you'll need for this RTOS
@@ -25,7 +29,8 @@ class FreeRTOSIntrospector(RTOSIntrospector, rtos_name="FreeRTOS"):
             "xLIST",
             "xLIST_ITEM",
             "xMINI_LIST_ITEM",
-            "QueueDefinition"
+            "QueueDefinition",
+            "TimerDefinition",
         ]
         symbols_to_export = {
             "pxCurrentTCB": self.symbols.get('pxCurrentTCB').address,

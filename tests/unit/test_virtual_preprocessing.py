@@ -4,6 +4,7 @@ import pytest
 
 from fastdyn.machine import VirtualInstruction
 from fastdyn.fastdyn import Machine
+from fastdyn import toml_parser
 from fastdyn.targets.qemu_target import build_qemu_cmd
 from fastdyn.virtual_preprocessing import (
     RUN_PREPROCESSORS,
@@ -32,6 +33,7 @@ class _Cpu:
 
     def __init__(self, *, introspect=False, irq_map=None):
         self.introspect = introspect
+        self.plugin_config = {"introspection": {"enabled": True}} if introspect else {}
         self.machine_obj = _MachineContext(irq_map)
 
 
@@ -115,7 +117,6 @@ def test_run_preprocessor_results_remain_declarative(monkeypatch, tmp_path):
             artifact.write_text("schema", encoding="utf-8")
             return RunPrepareResult(
                 virtuals=[VirtualInstruction("0x8000100", "debug_log", ["ready"])],
-                plugin_args={"introspection": "true", "introspection_schema": str(artifact)},
                 artifacts=[artifact],
             )
 
@@ -125,7 +126,7 @@ def test_run_preprocessor_results_remain_declarative(monkeypatch, tmp_path):
         RunDefinition(
             name="introspection",
             prepare=FakeIntrospection(),
-            enabled=lambda cpu: bool(cpu.introspect),
+            enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
         ),
     )
     cpu = _Cpu(introspect=True)
@@ -136,11 +137,66 @@ def test_run_preprocessor_results_remain_declarative(monkeypatch, tmp_path):
     generated = machine.generated_virtual_rules[id(cpu)]
     assert generated[0].origin == "introspection"
     assert generated[0].virtual.instruction == "debug_log"
-    assert machine.runtime_plugin_args["introspection"] == "true"
+    assert not hasattr(machine, "runtime_plugin_args")
     assert machine.preprocessing_prepared is True
     assert machine.preprocessing_artifacts == [
         tmp_path.resolve() / "run-artifacts" / "fake" / "schema.txt"
     ]
+
+
+def test_run_preprocessor_cannot_return_plugin_command_line_arguments():
+    with pytest.raises(TypeError, match="plugin_args"):
+        RunPrepareResult(plugin_args={"untrusted": "value"})
+
+
+def test_toml_plugin_settings_are_passed_without_frontend_feature_dispatch(tmp_path):
+    config = tmp_path / "plugin-settings.toml"
+    config.write_text(
+        """
+[Machine]
+platform = "generic-cortexm"
+
+[Device.Models.unhandled]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "1M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-plugin-settings.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+binary = "firmware.elf"
+
+[CPU.cpu0.plugins.example]
+enabled = true
+setting = "from-toml"
+""",
+        encoding="utf-8",
+    )
+
+    handle = toml_parser.parser(
+        str(tmp_path / "work"), "machine0", str(config),
+        "third_party/common/cmsis-svd-data", load_fmu=False,
+    )
+    cpu = handle.machines["machine0"].cpus[0]
+
+    assert cpu.plugin_config == {
+        "example": {"enabled": True, "setting": "from-toml"}
+    }
+
+
+def test_native_introspection_uses_the_generic_artifact_api_not_plugin_arguments():
+    source = Path("core/core.c").read_text(encoding="utf-8")
+    activity = Path("virtuals/introspection/activity.c").read_text(encoding="utf-8")
+
+    assert 'utils_get_arg("introspection"' not in source
+    assert 'utils_get_arg("introspection_schema"' not in source
+    assert 'utils_get_arg("introspection_activity_log"' not in activity
+    assert 'core_get_run_artifact_path("introspection/schema.txt"' in source
 
 
 def test_qemu_serialization_uses_the_shared_virtual_pipeline(tmp_path):

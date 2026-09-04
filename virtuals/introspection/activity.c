@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include <qemu/qemu-plugin.h>
-#include <utils.h>
+#include <core.h>
 
 static FILE *activity_stream;
 
@@ -30,9 +30,25 @@ static void json_string(FILE *stream, const char *value) {
     fputc('"', stream);
 }
 
-int inspct_activity_init(int argc, char **argv) {
-    const char *path = utils_get_arg("introspection_activity_log", argc, argv);
-    if (!path || !path[0] || !strcmp(path, "none")) {
+static void json_fields(const InspctActivityField *fields, size_t field_count) {
+    size_t index;
+    if (!fields || field_count == 0) {
+        return;
+    }
+    fputs(",\"fields\":{", activity_stream);
+    for (index = 0; index < field_count; ++index) {
+        if (index) {
+            fputc(',', activity_stream);
+        }
+        json_string(activity_stream, fields[index].name);
+        fprintf(activity_stream, ":%u", fields[index].value);
+    }
+    fputc('}', activity_stream);
+}
+
+int inspct_activity_init(void) {
+    char path[4096];
+    if (core_get_run_artifact_path("introspection/activity.jsonl", path, sizeof(path)) != 0) {
         return 0;
     }
     activity_stream = fopen(path, "a");
@@ -51,8 +67,11 @@ void inspct_activity_close(void) {
     }
 }
 
-void inspct_activity_emit(const char *rtos, const char *event, uint32_t task,
-                          const char *task_name, int32_t priority) {
+static void activity_emit_task(const char *rtos, const char *event, uint32_t task,
+                               const char *task_name, int32_t priority,
+                               int32_t task_state,
+                               const InspctActivityField *fields,
+                               size_t field_count) {
     if (!activity_stream) {
         return;
     }
@@ -73,5 +92,63 @@ void inspct_activity_emit(const char *rtos, const char *event, uint32_t task,
     if (priority >= 0) {
         fprintf(activity_stream, ",\"priority\":%d", priority);
     }
+    if (task_state >= 0) {
+        fprintf(activity_stream, ",\"task_state\":%d", task_state);
+    }
+    json_fields(fields, field_count);
+    fputs("}\n", activity_stream);
+}
+
+void inspct_activity_emit(const char *rtos, const char *event, uint32_t task,
+                          const char *task_name, int32_t priority) {
+    activity_emit_task(rtos, event, task, task_name, priority, -1, NULL, 0);
+}
+
+void inspct_activity_emit_task(const char *rtos, const char *event, uint32_t task,
+                               const char *task_name, int32_t priority,
+                               int32_t task_state) {
+    activity_emit_task(rtos, event, task, task_name, priority, task_state,
+                       NULL, 0);
+}
+
+void inspct_activity_emit_task_fields(const char *rtos, const char *event,
+                                      uint32_t task, const char *task_name,
+                                      int32_t priority, int32_t task_state,
+                                      const InspctActivityField *fields,
+                                      size_t field_count) {
+    activity_emit_task(rtos, event, task, task_name, priority, task_state,
+                       fields, field_count);
+}
+
+void inspct_activity_resource(const char *rtos, const char *event,
+                              const char *resource_type, uint32_t resource,
+                              const char *state) {
+    inspct_activity_resource_fields(rtos, event, resource_type, resource, state,
+                                    NULL, 0);
+}
+
+void inspct_activity_resource_fields(const char *rtos, const char *event,
+                                     const char *resource_type,
+                                     uint32_t resource, const char *state,
+                                     const InspctActivityField *fields,
+                                     size_t field_count) {
+    if (!activity_stream || !resource) {
+        return;
+    }
+
+    fputs("{\"time_ns\":", activity_stream);
+    fprintf(activity_stream, "%llu", (unsigned long long)qemu_plugin_get_virtual_timer());
+    fputs(",\"rtos\":", activity_stream);
+    json_string(activity_stream, rtos);
+    fputs(",\"event\":", activity_stream);
+    json_string(activity_stream, event);
+    fputs(",\"resource_type\":", activity_stream);
+    json_string(activity_stream, resource_type);
+    fprintf(activity_stream, ",\"resource\":\"0x%08X\"", resource);
+    if (state && state[0]) {
+        fputs(",\"state\":", activity_stream);
+        json_string(activity_stream, state);
+    }
+    json_fields(fields, field_count);
     fputs("}\n", activity_stream);
 }

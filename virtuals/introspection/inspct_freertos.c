@@ -20,6 +20,47 @@ typedef struct {
 uint32_t g_tracked_queues[MAX_TRACKED_QUEUES];
 size_t g_num_tracked_queues = 0;
 
+typedef struct {
+    uint32_t address;
+    const char *type;
+} FreeRTOSResource;
+
+#define MAX_TRACKED_RESOURCES 256
+static FreeRTOSResource g_resources[MAX_TRACKED_RESOURCES];
+static size_t g_resource_count = 0;
+
+static void freertos_track_resource(uint32_t address, const char *type) {
+    if (!address || !type) return;
+    for (size_t i = 0; i < g_resource_count; i++) {
+        if (g_resources[i].address == address) {
+            g_resources[i].type = type;
+            return;
+        }
+    }
+    if (g_resource_count < MAX_TRACKED_RESOURCES) {
+        g_resources[g_resource_count++] = (FreeRTOSResource){ address, type };
+    }
+}
+
+static const char *freertos_resource_type(uint32_t address) {
+    for (size_t i = 0; i < g_resource_count; i++) {
+        if (g_resources[i].address == address) return g_resources[i].type;
+    }
+    return "queue_or_semaphore";
+}
+
+static const char *freertos_queue_type(uint8_t type) {
+    switch (type) {
+        case 0: return "queue";
+        case 1: return "mutex";
+        case 2: return "counting_semaphore";
+        case 3: return "binary_semaphore";
+        case 4: return "recursive_mutex";
+        case 5: return "queue_set";
+        default: return "queue_or_semaphore";
+    }
+}
+
 void inspct_freertos_dump_ready_lists(uint32_t ready_lists_base_addr, uint32_t max_priorities);
 
 // The static helper function
@@ -174,6 +215,13 @@ void inpsct_freertos_xQueueGenericCreate_epi(unsigned int cpu_idx, void *arg) {
     // If allocation failed (OOM), R0 will be NULL (0)
     if (new_queue_handle == 0) return; 
 
+    uint8_t queue_type = 0xff;
+    inspct_get_field("QueueDefinition", new_queue_handle, "ucQueueType", &queue_type);
+    const char *resource_type = freertos_queue_type(queue_type);
+    freertos_track_resource(new_queue_handle, resource_type);
+    inspct_activity_resource("FreeRTOS", "resource_created", resource_type,
+                             new_queue_handle, "available");
+
     // 2. Prevent buffer overflows in our tracking array
     if (g_num_tracked_queues >= MAX_TRACKED_QUEUES) {
         return;
@@ -206,11 +254,55 @@ void inpsct_freertos_xQueueGenericCreate_epi(unsigned int cpu_idx, void *arg) {
     fflush(stdout);
 }
 
+void inpsct_freertos_xTimerCreate_epi(unsigned int cpu_idx, void *arg) {
+    (void)cpu_idx; (void)arg;
+    uint32_t timer = qemu_get_register(0);
+    if (!timer) return;
+    freertos_track_resource(timer, "timer");
+    inspct_activity_resource("FreeRTOS", "resource_created", "timer", timer, "inactive");
+}
+
+void inpsct_freertos_xQueueSemaphoreTake(unsigned int cpu_idx, void *arg) {
+    (void)cpu_idx; (void)arg;
+    uint32_t resource = qemu_get_register(0);
+    inspct_activity_resource("FreeRTOS", "resource_acquired",
+                             freertos_resource_type(resource), resource, "unavailable");
+}
+
+void inpsct_freertos_xQueueGenericSend(unsigned int cpu_idx, void *arg) {
+    (void)cpu_idx; (void)arg;
+    uint32_t resource = qemu_get_register(0);
+    inspct_activity_resource("FreeRTOS", "resource_released",
+                             freertos_resource_type(resource), resource, "available");
+}
+
+void inpsct_freertos_xTimerGenericCommand(unsigned int cpu_idx, void *arg) {
+    (void)cpu_idx; (void)arg;
+    uint32_t timer = qemu_get_register(0);
+    uint32_t command = qemu_get_register(1);
+    const char *event = "timer_command";
+    const char *state = NULL;
+    switch (command) {
+        case 0: case 1: case 2: case 6: case 7:
+            event = "timer_started"; state = "active"; break;
+        case 3: case 8:
+            event = "timer_stopped"; state = "inactive"; break;
+        case 5:
+            event = "resource_deleted"; state = "deleted"; break;
+    }
+    freertos_track_resource(timer, "timer");
+    inspct_activity_resource("FreeRTOS", event, "timer", timer, state);
+}
+
 int inspct_freertos_init(int argc, char ** argv) {
 	int status =0;
 	virtual_register("vTaskSwitchContext_Hook", inspct_freertos_vTaskSwitchContext);
 	virtual_register("prvAddNewTaskToReadyList_Hook", inspct_freertos_prvAddNewTaskToReadyList); 
 	virtual_register("xQueueGenericCreate_epi_Hook", inpsct_freertos_xQueueGenericCreate_epi);
+	virtual_register("xTimerCreate_epi_Hook", inpsct_freertos_xTimerCreate_epi);
+	virtual_register("xQueueSemaphoreTake_Hook", inpsct_freertos_xQueueSemaphoreTake);
+	virtual_register("xQueueGenericSend_Hook", inpsct_freertos_xQueueGenericSend);
+	virtual_register("xTimerGenericCommand_Hook", inpsct_freertos_xTimerGenericCommand);
 
 	return status;
 }

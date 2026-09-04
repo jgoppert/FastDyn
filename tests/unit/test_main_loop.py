@@ -3,6 +3,8 @@ import sys
 import tomllib
 import types
 
+from click.testing import CliRunner
+
 
 # fastdyn.main imports optional analysis backends that are not needed by this
 # loop control-flow test.
@@ -21,6 +23,14 @@ dwarf_provider.DwarfProvider = object
 sys.modules.setdefault("fastdyn.binary.symmap.providers.dwarf", dwarf_provider)
 
 from fastdyn import main
+
+
+def test_run_cli_has_no_introspection_feature_options():
+    result = CliRunner().invoke(main.cli, ["run", "--help"])
+
+    assert result.exit_code == 0
+    assert "activity-monitor" not in result.output
+    assert "introspection" not in result.output
 
 
 class FakeProcessManager:

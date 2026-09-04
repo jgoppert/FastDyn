@@ -136,8 +136,7 @@ CPU object, TOML parser, global work-directory layout, or QEMU command line.
 ## 4. Add a run-wide feature
 
 A run preprocessor is enabled for a CPU by its own predicate. It returns a
-declarative plan: generated `VirtualInstruction` objects, runtime plugin
-arguments, and artifacts.
+declarative plan: generated `VirtualInstruction` objects and artifacts.
 
 ```python
 from fastdyn.machine import VirtualInstruction
@@ -152,7 +151,6 @@ class ExampleFeature:
         schema.write_text("schema", encoding="utf-8")
         return RunPrepareResult(
             virtuals=[VirtualInstruction("feature_hook", "example_virtual", [str(schema)])],
-            plugin_args={"example_schema": str(schema)},
             artifacts=[schema],
         )
 
@@ -161,7 +159,7 @@ register_run_preprocessor(
     RunDefinition(
         name="example_feature",
         prepare=ExampleFeature(),
-        enabled=lambda cpu: bool(getattr(cpu, "example_feature", False)),
+        enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
     )
 )
 ```
@@ -171,9 +169,22 @@ runs their virtual preprocessors, validates capabilities, and serializes them
 with user rules. Two different virtuals cannot target the same PC because the
 native dispatcher supports one callback there.
 
-`plugin_args` are the only supported route for a run preprocessor to provide
-runtime arguments. Do not append QEMU command options directly. Conflicting
-values for the same plugin argument are an error.
+There is deliberately no `plugin_args` field. A virtual or run feature must
+never add a QEMU `--plugin` argument: FastDyn owns the launch command and is
+plugin agnostic. Put user settings in TOML, turn derived data into an artifact
+with `ctx.artifact_path()`, and have the native component resolve that logical
+artifact through FastDyn's generic native run-artifact API. The native
+component must not require a generated command-line option.
+
+For a run-wide module, FastDyn supplies only the settings from its TOML table,
+a namespaced artifact allocator (`ctx.plugin_artifact_path()`), a standard
+logger (`ctx.logger`), and generic cleanup callbacks returned in
+`RunPrepareResult.cleanup`. Configure it with:
+
+```toml
+[CPU.cpu0.plugins.example_feature]
+enabled = true
+```
 
 ## 5. Configure and test it
 

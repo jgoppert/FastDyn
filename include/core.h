@@ -40,6 +40,17 @@ int core_read_ram(uintptr_t address, size_t size, void* buffer);
  */
 int core_write_ram(uintptr_t address, size_t size, const void* buffer);
 
+/**
+ * Resolve an artifact owned by the active FastDyn run.
+ *
+ * The frontend owns the run directory and writes artifacts below
+ * ``run-artifacts``.  Native modules address one by a logical relative name
+ * (for example ``"introspection/schema.txt"``), never by adding a QEMU
+ * plugin argument.  Returns 0 on success and -1 when no safe run artifact
+ * path is available.
+ */
+int core_get_run_artifact_path(const char *relative, char *out, size_t out_size);
+
 // Wrapper for qemu's irq registration, allows multiple hooks
 void core_register_irq_hook(void (*cb)(int), void (*cb_end)(int));
 

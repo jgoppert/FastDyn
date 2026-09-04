@@ -37,8 +37,8 @@ class Fastdyn:
     def run(self, target, machine_name, out_path=None):
         machine = self.machines[machine_name]
         if target.lower() == "qemu":
-            # Firmware-wide modules (for example RTOS introspection) prepare
-            # declarative virtual rules and plugin arguments here.  The QEMU
+            # Firmware-wide modules prepare
+            # declarative virtual rules and artifacts here.  The QEMU
             # target later sends every generated and user rule through the
             # same per-virtual preparation pipeline.
             from .virtual_preprocessing import prepare_run_preprocessors
@@ -50,23 +50,27 @@ class Fastdyn:
             compile_device_routing(machine.devices, machine.parsed_device, models=machine.models) #return value will be written to machine.parsed_device
 
         if target.lower() == "qemu":
-            python_endpoints = _python_endpoints_for_machine(machine)
-            #write device config to the json file
-            with timing.phase(f"{machine_name}.qemu_setup"):
-                qemu_cmd, gdb_cmd, launch_gdb, binary = qemu_target.setup_qemu(
-                    machine,
-                    out_path
-                )
+            try:
+                python_endpoints = _python_endpoints_for_machine(machine)
+                #write device config to the json file
+                with timing.phase(f"{machine_name}.qemu_setup"):
+                    qemu_cmd, gdb_cmd, launch_gdb, binary = qemu_target.setup_qemu(
+                        machine,
+                        out_path
+                    )
 
-            with timing.phase(f"{machine_name}.qemu_execution"):
-                qemu_target.start_execution(
-                    qemu_cmd,
-                    launch_gdb,
-                    gdb_cmd,
-                    binary,
-                    python_endpoints=python_endpoints,
-                    exit_timeout_ms=machine.qemu_target_opts.exit_timeout_ms,
-                )
+                with timing.phase(f"{machine_name}.qemu_execution"):
+                    qemu_target.start_execution(
+                        qemu_cmd,
+                        launch_gdb,
+                        gdb_cmd,
+                        binary,
+                        python_endpoints=python_endpoints,
+                        exit_timeout_ms=machine.qemu_target_opts.exit_timeout_ms,
+                    )
+            finally:
+                for cleanup in reversed(getattr(machine, "preprocessing_cleanup", [])):
+                    cleanup()
 
 
     def shutdown(self, machine_name=None):
@@ -164,8 +168,8 @@ class Machine:
 
         self.parsed_device = {}            #internal to the machine for qemu understanding
         self.generated_virtual_rules: dict[int, list] = {}
-        self.runtime_plugin_args: dict[str, str] = {}
         self.preprocessing_artifacts: list[Path] = []
+        self.preprocessing_cleanup: list = []
         self.preprocessing_prepared: bool = False
         # Optional native-build or host-provided capabilities consumed by the
         # public virtual preprocessing SDK (for example, "fuzzing" or "fmu").
@@ -288,6 +292,7 @@ class CPU:
         self.twintrace = twintrace       #supported options are record, replay or None
         self.hardware_trace = hardware_trace    # hardware log needed in case of replay
         self.introspect: bool = introspect
+        self.plugin_config: dict[str, dict] = {}
         self.machine_obj = machine_obj
         self.exstng_config_path = exstng_config_path
 
@@ -306,8 +311,6 @@ class CPU:
                                             """
         self.symbol_dict = {}
 
-        # Populated by the introspection run preprocessor when enabled.
-        self.introspect_schema = ""
 
 
     def add_virtual_instruction(self, vi: Union["VirtualInstruction", str, Sequence[Union["VirtualInstruction", str]]]) -> bool:

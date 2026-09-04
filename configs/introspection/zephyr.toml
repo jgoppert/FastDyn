@@ -1,0 +1,40 @@
+# Zephyr's upstream synchronization sample for the Stellaris LM3S6965 board.
+# Using its real board model is necessary for SysTick-driven task activity.
+[Machine]
+platform = "generic-cortexm"
+qemu_path = "../qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-zephyr-introspection.qmp"
+log_options = "none"
+reset_memory_files = true
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "8M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-zephyr-introspection.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "lm3s6965evb"
+cpu = "cortex-m3"
+binary = "tests/binaries/rtos/zephyr.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
+
+[CPU.cpu0.plugins.introspection.activity_monitor]
+enabled = true
+port = 8767
+open_browser = true

@@ -1,9 +1,9 @@
 """Public preprocessing SDK for FastDyn virtuals and run-wide features.
 
 The frontend owns orchestration of this module.  A virtual or feature module
-owns its own argument interpretation, host-side preparation, artifacts, and
-runtime arguments.  Callers outside FastDyn should never dispatch on a virtual
-name.
+owns its own argument interpretation, host-side preparation, and artifacts.
+Callers outside FastDyn should never dispatch on a virtual name.  In
+particular, preprocessing cannot add QEMU/plugin command-line arguments.
 """
 
 from __future__ import annotations
@@ -11,8 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Protocol, Sequence
+import importlib
 import logging
 import os
+import pkgutil
 
 from .machine import VirtualInstruction
 from .utils import parse_config as parse_helper
@@ -69,6 +71,8 @@ class RunContext:
     symbols: Mapping[str, int] = field(default_factory=dict)
     irq_map: Mapping[str, int] = field(default_factory=dict)
     capabilities: frozenset[str] = frozenset()
+    plugin_name: str = ""
+    settings: Mapping[str, object] = field(default_factory=dict)
 
     def artifact_path(self, relative_path: str) -> Path:
         candidate = Path(relative_path)
@@ -80,6 +84,18 @@ class RunContext:
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
+    def plugin_artifact_path(self, relative_path: str) -> Path:
+        """Allocate a module-private artifact below this run's shared root."""
+        if not self.plugin_name:
+            raise VirtualPreparationError("run context has no plugin name")
+        return self.artifact_path(f"{self.plugin_name}/{relative_path}")
+
+    @property
+    def logger(self) -> logging.Logger:
+        """Use FastDyn's normal logging hierarchy for module diagnostics."""
+        from .fastdyn_log import getFastdynLogger
+        return getFastdynLogger()
+
 
 @dataclass(frozen=True)
 class VirtualPrepareResult:
@@ -90,8 +106,8 @@ class VirtualPrepareResult:
 @dataclass(frozen=True)
 class RunPrepareResult:
     virtuals: list[VirtualInstruction] = field(default_factory=list)
-    plugin_args: Mapping[str, str] = field(default_factory=dict)
     artifacts: list[Path] = field(default_factory=list)
+    cleanup: list[Callable[[], None]] = field(default_factory=list)
 
 
 class VirtualPreprocessor(Protocol):
@@ -101,7 +117,7 @@ class VirtualPreprocessor(Protocol):
 
 class RunPreprocessor(Protocol):
     def prepare(self, ctx: RunContext) -> RunPrepareResult:
-        """Return generated virtuals, runtime arguments, and artifacts."""
+        """Return generated virtuals and artifacts."""
 
 
 @dataclass(frozen=True)
@@ -119,7 +135,7 @@ class RunDefinition:
 
     name: str
     prepare: RunPreprocessor
-    enabled: Callable[[object], bool]
+    enabled: Callable[[RunContext], bool]
 
 
 @dataclass(frozen=True)
@@ -145,6 +161,13 @@ def register_run_preprocessor(definition: RunDefinition) -> None:
     if definition.name in RUN_PREPROCESSORS:
         raise ValueError(f"run preprocessor already registered: {definition.name}")
     RUN_PREPROCESSORS[definition.name] = definition
+
+
+def _load_run_plugins() -> None:
+    """Discover installed run modules without naming any one implementation."""
+    package = importlib.import_module(".plugins", __package__)
+    for module in pkgutil.iter_modules(package.__path__, f"{package.__name__}."):
+        importlib.import_module(module.name)
 
 
 class CortexMIrqPreprocessor:
@@ -206,46 +229,7 @@ def _register_builtin_virtuals() -> None:
 
 
 _register_builtin_virtuals()
-
-
-class IntrospectionRunPreprocessor:
-    """Prepare RTOS-wide instrumentation without exposing hook names to callers."""
-
-    def prepare(self, ctx: RunContext) -> RunPrepareResult:
-        from .introspect.introspect import introspect_rtos
-
-        plan = introspect_rtos(ctx.binary)
-        schema_path = ctx.artifact_path("introspection/schema.txt")
-        schema_path.write_text(plan.schema, encoding="utf-8")
-        # Native callbacks append structured activity records here.  The
-        # activity monitor is a generic consumer of this artifact; neither it
-        # nor BoardRunner needs to know the RTOS or hook names involved.
-        activity_path = ctx.artifact_path("introspection/activity.jsonl")
-        activity_path.touch()
-        # The native introspection runtime registers these callbacks. Register
-        # their Python definitions at the same module boundary so the generic
-        # frontend never needs RTOS-specific hook-name knowledge.
-        for virtual in plan.virtuals:
-            if virtual.instruction not in VIRTUAL_DEFINITIONS:
-                register_virtual(VirtualDefinition(name=virtual.instruction))
-        return RunPrepareResult(
-            virtuals=plan.virtuals,
-            plugin_args={
-                "introspection": "true",
-                "introspection_schema": str(schema_path),
-                "introspection_activity_log": str(activity_path),
-            },
-            artifacts=[schema_path, activity_path],
-        )
-
-
-register_run_preprocessor(
-    RunDefinition(
-        name="introspection",
-        prepare=IntrospectionRunPreprocessor(),
-        enabled=lambda cpu: bool(getattr(cpu, "introspect", False)),
-    )
-)
+_load_run_plugins()
 
 
 def _context_for_cpu(cpu: object, workdir: Path, trigger_pc: int) -> VirtualContext:
@@ -263,7 +247,7 @@ def _context_for_cpu(cpu: object, workdir: Path, trigger_pc: int) -> VirtualCont
     )
 
 
-def _run_context_for_cpu(cpu: object, workdir: Path) -> RunContext:
+def _run_context_for_cpu(cpu: object, workdir: Path, plugin_name: str) -> RunContext:
     machine_obj = getattr(cpu, "machine_obj")
     return RunContext(
         binary=Path(str(getattr(cpu, "binary"))).expanduser(),
@@ -274,6 +258,10 @@ def _run_context_for_cpu(cpu: object, workdir: Path) -> RunContext:
         symbols=dict(getattr(cpu, "symbol_dict", {}) or {}),
         irq_map=dict(getattr(machine_obj, "irq_map", {}) or {}),
         capabilities=_capabilities_for_cpu(cpu),
+        plugin_name=plugin_name,
+        settings=dict(
+            (getattr(cpu, "plugin_config", {}) or {}).get(plugin_name, {})
+        ),
     )
 
 
@@ -287,8 +275,6 @@ def _capabilities_for_cpu(cpu: object) -> frozenset[str]:
     machine_obj = getattr(cpu, "machine_obj")
     capabilities = set(getattr(machine_obj, "virtual_capabilities", set()) or set())
     capabilities.add("core")
-    if bool(getattr(cpu, "introspect", False)):
-        capabilities.add("introspection")
     if bool(getattr(getattr(machine_obj, "qemu_target_opts", None), "fuzzing", False)):
         capabilities.add("fuzzing")
     if getattr(machine_obj, "fmu_path", None):
@@ -300,30 +286,30 @@ def prepare_run_preprocessors(machine: object, workdir: str | Path) -> None:
     """Run enabled firmware-wide preprocessors and store declarative results."""
     workdir_path = Path(workdir).expanduser().resolve()
     generated: dict[int, list[VirtualRule]] = {}
-    plugin_args: dict[str, str] = {}
     artifacts: list[Path] = []
+    cleanup: list[Callable[[], None]] = []
 
-    for cpu in getattr(machine, "cpus", []):
-        for definition in RUN_PREPROCESSORS.values():
-            if not definition.enabled(cpu):
-                continue
-            result = definition.prepare.prepare(_run_context_for_cpu(cpu, workdir_path))
-            generated.setdefault(id(cpu), []).extend(
-                VirtualRule(virtual=virtual, origin=definition.name)
-                for virtual in result.virtuals
-            )
-            for name, value in result.plugin_args.items():
-                old = plugin_args.get(name)
-                if old is not None and old != value:
-                    raise VirtualPreparationError(
-                        f"conflicting runtime argument {name!r}: {old!r} vs {value!r}"
-                    )
-                plugin_args[name] = value
-            artifacts.extend(result.artifacts)
+    try:
+        for cpu in getattr(machine, "cpus", []):
+            for definition in RUN_PREPROCESSORS.values():
+                context = _run_context_for_cpu(cpu, workdir_path, definition.name)
+                if not definition.enabled(context):
+                    continue
+                result = definition.prepare.prepare(context)
+                generated.setdefault(id(cpu), []).extend(
+                    VirtualRule(virtual=virtual, origin=definition.name)
+                    for virtual in result.virtuals
+                )
+                artifacts.extend(result.artifacts)
+                cleanup.extend(result.cleanup)
+    except Exception:
+        for close in reversed(cleanup):
+            close()
+        raise
 
     machine.generated_virtual_rules = generated
-    machine.runtime_plugin_args = plugin_args
     machine.preprocessing_artifacts = artifacts
+    machine.preprocessing_cleanup = cleanup
     machine.preprocessing_prepared = True
 
 

@@ -72,6 +72,19 @@ two-worker swarms for all three vehicles, and runs the full ArduCopter mission.
 
 ## Upstream RTOS introspection smoke test
 
+For a fast local configuration test with no clone, build, or RTOS submodule,
+run the committed DWARF-enabled FreeRTOS fixture:
+
+```bash
+tests/integration/run_bundled_freertos_introspection_smoke.sh
+```
+
+It writes a temporary TOML configuration with an enabled
+`[CPU.cpu0.plugins.introspection]` table, launches
+the bundled `RTOSDemo.axf`, and verifies detection, generated hook virtuals,
+schema generation, and live activity records. It needs only patched QEMU,
+`build/libfastdyn.so`, and the FastDyn virtual environment.
+
 The scripts below shallow-clone upstream RTOS sources into a temporary
 directory, build an official demo with DWARF symbols, and run the complete
 FastDyn/QEMU introspection path. They do not add RTOS submodules. They need

@@ -119,7 +119,7 @@ def supported_rtos() -> frozenset[str]:
     return frozenset(RTOSIntrospector._registry)
 
 
-def introspect_rtos(binary):
+def introspect_rtos(binary, *, architecture="", machine="", cpu=""):
     """Inspect an ELF and return schema plus internal hook rules.
 
     This function deliberately does not mutate a FastDyn CPU object. The
@@ -146,7 +146,10 @@ def introspect_rtos(binary):
         )
         return IntrospectionPlan(schema="")
     # Dynamically instantiate the correct introspector!
-    introspector = RTOSIntrospector.create(rtos_name, None, syms, binary)
+    introspector = RTOSIntrospector.create(
+        rtos_name, None, syms, binary,
+        architecture=architecture, machine=machine, cpu=cpu,
+    )
     # Fire up the OS-specific hooks
     schema_contents = introspector.setup_hooks()
 
