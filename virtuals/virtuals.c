@@ -27,13 +27,13 @@
 #endif
 #include <virtuals.h>
 #include <probe.h>
-#include "introspection/inspct.h"
+#include "introspection/runtime/inspct.h"
 // #include "ardupilot_virtuals.c"
 #if ENABLE_LIBGZ
     #include "phy.h"
 #endif
 
-#include "introspection/inspct.h"
+#include "introspection/runtime/inspct.h"
 
 #include <sys/mman.h>
 #include <fcntl.h>

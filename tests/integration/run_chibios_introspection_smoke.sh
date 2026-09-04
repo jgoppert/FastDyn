@@ -52,8 +52,10 @@ machine = "cortexm"
 cpu = "cortex-m4"
 binary = "$demo/build/ch.elf"
 plugin_library = "$plugin_lib"
-introspect = true
 init_nsvtor = "0x08000000"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
 EOF
 
 set +e

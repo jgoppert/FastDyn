@@ -61,7 +61,8 @@ machine = "vexpress-a9"
 cpu = "cortex-a9"
 binary = "$bsp/rtthread.elf"
 plugin_library = "$plugin_lib"
-introspect = true
+[CPU.cpu0.plugins.introspection]
+enabled = true
 EOF
 
 set +e

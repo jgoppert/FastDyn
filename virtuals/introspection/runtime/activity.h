@@ -1,3 +1,4 @@
+/* Introspection native runtime activity API. */
 #ifndef FASTDYN_INTROSPECTION_ACTIVITY_H
 #define FASTDYN_INTROSPECTION_ACTIVITY_H
 

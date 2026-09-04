@@ -1,3 +1,4 @@
+/* Introspection native runtime event stream. */
 #include "activity.h"
 
 #include <stdio.h>

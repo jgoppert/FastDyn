@@ -70,8 +70,10 @@ machine = "lm3s6965evb"
 cpu = "cortex-m3"
 binary = "$smoke_dir/build/zephyr/zephyr.elf"
 plugin_library = "$plugin_lib"
-introspect = true
 init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
 EOF
 
 set +e

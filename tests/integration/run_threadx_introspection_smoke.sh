@@ -61,10 +61,12 @@ machine = "cortexm"
 cpu = "cortex-m4"
 binary = "$binary"
 plugin_library = "$plugin_lib"
-introspect = true
 # ThreadX's reference linker script names the vector section .vectors. The
 # generic Cortex-M board starts from address zero, so bypass .isr_vector lookup.
 init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
 EOF
 
 set +e

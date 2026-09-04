@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from fastdyn.introspect import generic_rtos_introspector
-from fastdyn.introspect.generic_rtos_introspector import zephyr_switch_hook
-from fastdyn.introspect.introspect import RTOS_SIGNATURES, identify_rtos, supported_rtos
-from fastdyn.introspect.introspector_base import RTOSIntrospector
+from virtuals.introspection.host.rtos import generic_rtos_introspector
+from virtuals.introspection.host.rtos.generic_rtos_introspector import zephyr_switch_hook
+from virtuals.introspection.host.introspect import RTOS_SIGNATURES, identify_rtos, supported_rtos
+from virtuals.introspection.host.introspector_base import RTOSIntrospector
 
 
 def test_detection_catalogue_is_explicit_and_complete():

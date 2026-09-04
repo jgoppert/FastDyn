@@ -58,8 +58,10 @@ machine = "cortexm"
 cpu = "cortex-m3"
 binary = "$demo/build/gcc/output/RTOSDemo.out"
 plugin_library = "$plugin_lib"
-introspect = true
 init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
 EOF
 
 set +e

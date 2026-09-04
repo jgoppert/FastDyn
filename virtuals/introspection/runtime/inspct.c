@@ -1,3 +1,4 @@
+/* Introspection native runtime schema access. */
 #include <virtuals.h>
 #include "inspct.h"
 #include "activity.h"

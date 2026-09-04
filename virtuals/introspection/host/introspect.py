@@ -2,11 +2,12 @@ from fastdyn.binary.symmap import SymbolResolver
 from fastdyn.binary.symmap.core import SymbolInfo
 from fastdyn.binary.symmap.providers.dwarf import DwarfProvider
 from fastdyn import fastdyn_log as fastdyn_log_conf
-from fastdyn.introspect.introspector_base import RTOSIntrospector
+from .introspector_base import RTOSIntrospector
 from fastdyn.machine import VirtualInstruction
 from dataclasses import dataclass, field
 from elftools.elf.elffile import ELFFile
-import os, importlib
+import importlib
+from pathlib import Path
 
 fastdyn_log = fastdyn_log_conf.getFastdynLogger()
 
@@ -96,16 +97,15 @@ def _add_elf_symbol_table_symbols(binary, symbols):
 
 def _load_local_introspectors():
     """Scans the current directory for anything ending in _introspector.py"""
-    # Get the directory where this script is running
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-
-    for filename in os.listdir(current_dir):
+    current_dir = Path(__file__).parent / "rtos"
+    for source in current_dir.glob("*_introspector.py"):
+        filename = source.name
         # Only load files that match our strict naming convention
         if filename.endswith('_introspector.py') and filename != 'base_introspector.py':
             # Strip the '.py' extension to get the module name
             module_name = filename[:-3]
             # Dynamically import it, triggering the auto-registration
-            importlib.import_module(f"fastdyn.introspect.{module_name}")
+            importlib.import_module(f"{__package__}.rtos.{module_name}")
 
 
 def supported_rtos() -> frozenset[str]:

@@ -2,7 +2,7 @@ import json
 import threading
 from urllib.request import urlopen
 
-from fastdyn.introspect.activity_monitor import (
+from virtuals.introspection.host.activity_monitor import (
     activity_log_path,
     activity_snapshot,
     create_activity_server,
@@ -51,6 +51,8 @@ def test_activity_snapshot_summarizes_live_jsonl(tmp_path):
 
     assert len(snapshot.events) == 4
     assert snapshot.summary["event_count"] == 4
+    assert snapshot.summary["last_event"] == "task_switch"
+    assert snapshot.summary["last_event_time_ns"] == 20
     assert snapshot.summary["rtoses"] == {"FreeRTOS": 3, "Unknown": 1}
     assert snapshot.summary["tasks"] == [{
         "task": "0x20000010",
@@ -108,6 +110,9 @@ def test_activity_server_exposes_a_browser_api(tmp_path):
         assert b"Kernel resources" in page
         assert b"TCB inspector" in page
         assert b"values update from new observations" in page
+        assert b"connected \xc2\xb7 idle" in page
+        assert b"No RTOS events observed for" in page
+        assert b"2px solid #f05252" in page
     finally:
         server.shutdown()
         server.server_close()

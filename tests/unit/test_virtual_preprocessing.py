@@ -31,9 +31,8 @@ class _Cpu:
     cpu = "cortex-m4"
     symbol_dict = {"main": 0x08000101}
 
-    def __init__(self, *, introspect=False, irq_map=None):
-        self.introspect = introspect
-        self.plugin_config = {"introspection": {"enabled": True}} if introspect else {}
+    def __init__(self, *, plugin_enabled=False, irq_map=None):
+        self.plugin_config = {"introspection": {"enabled": True}} if plugin_enabled else {}
         self.machine_obj = _MachineContext(irq_map)
 
 
@@ -129,7 +128,7 @@ def test_run_preprocessor_results_remain_declarative(monkeypatch, tmp_path):
             enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
         ),
     )
-    cpu = _Cpu(introspect=True)
+    cpu = _Cpu(plugin_enabled=True)
     machine = _Machine(cpu)
 
     prepare_run_preprocessors(machine, tmp_path)
@@ -191,7 +190,7 @@ setting = "from-toml"
 
 def test_native_introspection_uses_the_generic_artifact_api_not_plugin_arguments():
     source = Path("core/core.c").read_text(encoding="utf-8")
-    activity = Path("virtuals/introspection/activity.c").read_text(encoding="utf-8")
+    activity = Path("virtuals/introspection/runtime/activity.c").read_text(encoding="utf-8")
 
     assert 'utils_get_arg("introspection"' not in source
     assert 'utils_get_arg("introspection_schema"' not in source
@@ -212,7 +211,7 @@ def test_qemu_serialization_uses_the_shared_virtual_pipeline(tmp_path):
     )
     cpu = machine.add_cpu(
         "arm", "cortexm", "cortex-m4", str(firmware), None,
-        "None", None, False, False,
+        "None", None, False,
     )
     cpu.plugin_library = str(plugin)
     cpu.add_virtual_instruction(
@@ -240,7 +239,7 @@ def test_qemu_omits_ram_base_global_for_toml_zero_address(tmp_path):
     )
     cpu = machine.add_cpu(
         "arm", "virt", "cortex-a7", str(firmware), None,
-        "None", None, False, False,
+        "None", None, False,
     )
     cpu.plugin_library = str(plugin)
     machine.qemu_target_opts.qemu_path = "/bin/true"

@@ -12,9 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Protocol, Sequence
 import importlib
+import importlib.util
 import logging
 import os
-import pkgutil
+import sys
+import types
 
 from .machine import VirtualInstruction
 from .utils import parse_config as parse_helper
@@ -164,10 +166,51 @@ def register_run_preprocessor(definition: RunDefinition) -> None:
 
 
 def _load_run_plugins() -> None:
-    """Discover installed run modules without naming any one implementation."""
-    package = importlib.import_module(".plugins", __package__)
-    for module in pkgutil.iter_modules(package.__path__, f"{package.__name__}."):
-        importlib.import_module(module.name)
+    """Load preprocessors beside their compiled virtual/plugin sources.
+
+    The frontend deliberately knows neither plugin names nor implementation
+    modules. A built-in feature supplies ``virtuals/<feature>/host/preprocessor.py``
+    and registers itself through the public API when loaded.
+    """
+    virtuals_root = Path(__file__).resolve().parents[2] / "virtuals"
+    if not virtuals_root.is_dir():
+        return
+    for source in sorted(virtuals_root.glob("*/host/preprocessor.py")):
+        package_name = f"_fastdyn_virtual_plugin_{source.parent.parent.name}"
+        module_name = f"{package_name}.host.preprocessor"
+        if module_name in sys.modules:
+            continue
+        # Make the feature directory a private package so its preprocessor
+        # can use normal relative imports for its own Python implementation.
+        package = sys.modules.get(package_name)
+        if package is None:
+            feature_dir = source.parent.parent
+            package_init = feature_dir / "__init__.py"
+            if package_init.is_file():
+                package_spec = importlib.util.spec_from_file_location(
+                    package_name, package_init,
+                    submodule_search_locations=[str(feature_dir)],
+                )
+                if package_spec is None or package_spec.loader is None:
+                    raise ImportError(f"cannot create FastDyn plugin package: {feature_dir}")
+                package = importlib.util.module_from_spec(package_spec)
+                sys.modules[package_name] = package
+                package_spec.loader.exec_module(package)
+            else:
+                # A feature needs only host/preprocessor.py. Give it a
+                # namespace package rather than executing that file twice as
+                # an ersatz package initializer.
+                package = types.ModuleType(package_name)
+                package.__path__ = [str(feature_dir)]
+                package.__package__ = package_name
+                sys.modules[package_name] = package
+        importlib.import_module(f"{package_name}.host")
+        spec = importlib.util.spec_from_file_location(module_name, source)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load FastDyn plugin preprocessor: {source}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
 
 
 class CortexMIrqPreprocessor:

@@ -175,8 +175,8 @@ class Machine:
         # public virtual preprocessing SDK (for example, "fuzzing" or "fmu").
         self.virtual_capabilities: set[str] = set()
 
-    def add_cpu(self, arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, introspect, exstng_config_path):
-        cpu = CPU(arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, introspect, exstng_config_path, self) #pass parent for easy referencing to objs like irq_map
+    def add_cpu(self, arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, exstng_config_path):
+        cpu = CPU(arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, exstng_config_path, self) #pass parent for easy referencing to objs like irq_map
         self.cpus.append(cpu)
         return cpu
 
@@ -282,7 +282,7 @@ class InstructionModifier:
     patch: str
 
 class CPU:
-    def __init__(self, arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, introspect, exstng_config_path, machine_obj):
+    def __init__(self, arch, machine, cpu, binary, init_nsvtor, twintrace, hardware_trace, exstng_config_path, machine_obj):
         """One CPU instance belonging to a machine."""
         self.arch = arch
         self.machine = machine
@@ -291,7 +291,6 @@ class CPU:
         self.init_nsvtor: int = init_nsvtor
         self.twintrace = twintrace       #supported options are record, replay or None
         self.hardware_trace = hardware_trace    # hardware log needed in case of replay
-        self.introspect: bool = introspect
         self.plugin_config: dict[str, dict] = {}
         self.machine_obj = machine_obj
         self.exstng_config_path = exstng_config_path

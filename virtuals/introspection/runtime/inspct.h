@@ -1,5 +1,6 @@
 
 
+/* Introspection native runtime schema API. */
 #ifndef INSPECT_H
 #define INSPECT_H
 

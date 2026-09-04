@@ -1,11 +1,11 @@
-"""RTOS introspection run module and optional browser activity view."""
+"""RTOS introspection's host-side preparation, colocated with its C runtime."""
 
 from __future__ import annotations
 
 from typing import Callable
 
-from fastdyn.introspect.activity_monitor import start_activity_monitor
-from fastdyn.introspect.introspect import introspect_rtos
+from .activity_monitor import start_activity_monitor
+from .introspect import introspect_rtos
 from fastdyn.virtual_preprocessing import (
     RunContext,
     RunDefinition,

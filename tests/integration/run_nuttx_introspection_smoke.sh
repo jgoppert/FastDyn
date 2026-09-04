@@ -83,7 +83,8 @@ machine = "virt"
 cpu = "cortex-a7"
 binary = "$nuttx_path/nuttx"
 plugin_library = "$plugin_lib"
-introspect = true
+[CPU.cpu0.plugins.introspection]
+enabled = true
 EOF
 
 set +e
@@ -97,7 +98,7 @@ if [[ $status -ne 0 && $status -ne 124 ]]; then
     exit "$status"
 fi
 grep -q 'Detected RTOS:NuttX' "$smoke_dir/fastdyn.log"
-grep -q '\[NuttX\] scheduler event' "$smoke_dir/fastdyn.log"
-grep -q 'nxsched_add_readytorun_Hook' "$smoke_dir/work/virtuals/virtuals.txt"
+grep -q '"rtos":"NuttX","event":"task_switch"' "$smoke_dir/work/run-artifacts/introspection/activity.jsonl"
+grep -q 'nxsched_switch_context_Hook' "$smoke_dir/work/virtuals/virtuals.txt"
 grep -q '^SYMBOL g_readytorun ' "$smoke_dir/work/run-artifacts/introspection/schema.txt"
 echo "NuttX FastDyn introspection smoke test passed"

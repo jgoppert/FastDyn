@@ -1,3 +1,4 @@
+/* Native FreeRTOS introspection runtime. */
 #include <stdio.h>
 #include "inspct.h"
 #include "activity.h"
@@ -61,7 +62,6 @@ static const char *freertos_queue_type(uint8_t type) {
     }
 }
 
-void inspct_freertos_dump_ready_lists(uint32_t ready_lists_base_addr, uint32_t max_priorities);
 
 // The static helper function
 static bool freertos_extract_tcb_info(uint32_t tcb_addr, FreeRTOSTaskState *out_state) {
@@ -97,16 +97,8 @@ void inspct_freertos_vTaskSwitchContext(unsigned int cpu_idx, void *arg) {
         return;
     }
 
-    printf("[FreeRTOS] Switched to Task: %s | Prio: %u | TCB: 0x%08X\n",
-           task.task_name, task.priority, task.tcb_addr);
     inspct_activity_emit("FreeRTOS", "task_switch", task.tcb_addr,
                          task.task_name, (int32_t)task.priority);
-
-	// Dump the state of every other task sitting in the ready lists
-	uint32_t g_ready_lists_addr = inspct_get_symbol("pxReadyTasksLists");
-	// g_max_priorities hardcoded for now
-    inspct_freertos_dump_ready_lists(g_ready_lists_addr, 5);
-    fflush(stdout);
 }
 
 void inspct_freertos_prvAddNewTaskToReadyList(unsigned int cpu_idx, void *arg) {
@@ -117,17 +109,15 @@ void inspct_freertos_prvAddNewTaskToReadyList(unsigned int cpu_idx, void *arg) {
         return;
     }
 
-    printf("[FreeRTOS] [+] New Task Registered: %s | Prio: %u | TCB: 0x%08X\n",
-           task.task_name, task.priority, task.tcb_addr);
     inspct_activity_emit("FreeRTOS", "task_created", task.tcb_addr,
                          task.task_name, (int32_t)task.priority);
-    fflush(stdout);
 }
 
 
 void inspct_freertos_vTaskDelay(unsigned int cpu_idx, void *arg) {
     // 1. In ARM AAPCS, the first argument (xTicksToDelay) is in R0
     uint32_t ticks_to_delay = qemu_get_register(0);
+    (void)ticks_to_delay;
 
     // 2. The task calling vTaskDelay is always the currently active task
     uint32_t pxCurrentTCB_global_addr = (uint32_t)strtoul((char*)arg, NULL, 16);
@@ -139,14 +129,12 @@ void inspct_freertos_vTaskDelay(unsigned int cpu_idx, void *arg) {
         return;
     }
 
-    // 3. Log the delay event
-    printf("[FreeRTOS] [zZz] Task '%s' (Prio: %u) delaying for %u ticks. TCB: 0x%08X\n",
-           task.task_name, task.priority, ticks_to_delay, task.tcb_addr);
+    // Record the delay event in the structured activity artifact.
     inspct_activity_emit("FreeRTOS", "task_delayed", task.tcb_addr,
                          task.task_name, (int32_t)task.priority);
-    fflush(stdout);
 }
 
+#if 0 /* Legacy terminal-only ready-list dump; activity.jsonl replaces it. */
 static void freertos_walk_list(uint32_t list_addr, const char* list_name) {
     uint32_t num_items = 0;
 
@@ -206,6 +194,7 @@ void inspct_freertos_dump_ready_lists(uint32_t ready_lists_base_addr, uint32_t m
     printf("[FreeRTOS] =================================\n");
     fflush(stdout);
 }
+#endif
 
 
 void inpsct_freertos_xQueueGenericCreate_epi(unsigned int cpu_idx, void *arg) {
@@ -235,23 +224,7 @@ void inpsct_freertos_xQueueGenericCreate_epi(unsigned int cpu_idx, void *arg) {
     // 4. Save the handle!
     g_tracked_queues[g_num_tracked_queues++] = new_queue_handle;
 
-    printf("[FreeRTOS] [+] Queue/Mutex %ld Allocated at: 0x%08X\n", g_num_tracked_queues, new_queue_handle);
-
-	uint32_t curr = getCurrentTCB();
-	if (curr == 0) {
-            printf("[FreeRTOS] Queue not owned by any task, probably Kernel queue or from main.");
-    } else {
-		FreeRTOSTaskState task;
-	    if (!freertos_extract_tcb_info(curr, &task)) {
-    	    return;
-	    }
-
-	    printf("[FreeRTOS] Queue owned by Task: %s | Prio: %u | TCB: 0x%08X\n",
-	           task.task_name, task.priority, task.tcb_addr);
-	}
-
-
-    fflush(stdout);
+    /* Resource creation was already emitted to activity.jsonl above. */
 }
 
 void inpsct_freertos_xTimerCreate_epi(unsigned int cpu_idx, void *arg) {

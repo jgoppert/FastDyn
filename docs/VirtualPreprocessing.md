@@ -159,8 +159,8 @@ FastDyn.
 
 ## RTOS introspection
 
-RTOS introspection is the first run-wide implementation of this SDK. When
-`introspect = true` is set for a CPU, its run preprocessor:
+RTOS introspection is the first run-wide implementation of this SDK. When its
+generic plugin TOML table is enabled for a CPU, its run preprocessor:
 
 1. inspects the firmware's symbols and identifies the RTOS;
 2. resolves RTOS hook locations;

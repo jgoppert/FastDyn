@@ -16,7 +16,6 @@ cpu0 = machine0.add_cpu(
     cpu="cortex-m4",
     binary="boardrunner/boardrunner_examples/examples/STM32F429i-disc1/gpio/firmwares/gpio.axf",
     init_nsvtor="0x08000000",
-    introspect=False,
     )
 
 machine0.add_cmsis_svd(cmsis_svd="third_party/common/cmsis-svd-data")

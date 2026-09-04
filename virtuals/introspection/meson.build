@@ -1,5 +1,5 @@
 
-inspct_inc = include_directories('.')
+inspct_inc = include_directories('runtime')
 local_include = [local_include, inspct_inc]
 
-srcs += files('activity.c', 'inspct.c', 'inspct_chibios.c', 'inspct_freertos.c', 'inspct_generic.c', 'resources.c', 'schema_loader.c')
+srcs += files('runtime/activity.c', 'runtime/inspct.c', 'runtime/inspct_chibios.c', 'runtime/inspct_freertos.c', 'runtime/inspct_generic.c', 'runtime/resources.c', 'runtime/schema_loader.c')

@@ -77,9 +77,11 @@ from fastdyn.virtual_preprocessing import VirtualDefinition, register_virtual
 register_virtual(VirtualDefinition(name="example_virtual"))
 ```
 
-For an in-tree built-in, add the definition beside the other built-ins in
-`src/fastdyn/virtual_preprocessing.py`'s `_register_builtin_virtuals()`.
-This is currently the registration point loaded by every FastDyn run.
+For a virtual or feature module, keep the Python registration beside its
+native implementation as `virtuals/<feature>/host/preprocessor.py`. FastDyn scans
+those files generically; importing the file must call `register_virtual()`
+and/or `register_run_preprocessor()`. The frontend does not import a feature
+by name.
 
 `requires` names runtime capabilities needed by the callback. For example,
 `frozenset({"fmu"})` prevents the rule from being serialized unless the FMU
@@ -216,18 +218,27 @@ Finally verify that the generated `<work-dir>/virtuals/virtuals.txt` contains
 the expected trigger address, callback name, and final arguments, and test the
 native callback with the relevant firmware.
 
-## Current extension-loading boundary
+## Preprocessor location
 
-FastDyn currently loads built-in Python registrations from its own source
-tree. It does **not** yet provide package discovery, an entry-point mechanism,
-or a TOML field that imports an arbitrary third-party Python module. Therefore
-an external package cannot become active merely by being installed.
+Compiled native code and its host-side preprocessor live together. A feature
+directory has this shape:
 
-Until generic extension loading is added, treat the supported authoring path
-as an in-tree FastDyn contribution: add the self-contained preprocessor module
-and import/register it from FastDyn's preprocessing registration layer. This
-limitation is intentional to document rather than hide; adding generic module
-discovery is the next step for a fully self-service third-party plugin SDK.
+```text
+virtuals/example_feature/
+  runtime/
+    example_feature.c
+  host/
+    preprocessor.py
+    # optional helpers: schema generation, analysis, UI, etc.
+```
+
+FastDyn scans `virtuals/*/host/preprocessor.py` and imports each file generically.
+The file self-registers its stable TOML name; FastDyn never contains an
+`if plugin_name == ...` dispatch. Keep all feature-specific host logic here as
+well—schema planning, firmware analysis, internal hook selection, and a UI are
+plugin code. It may use the documented generic FastDyn APIs, such as symbol
+resolution and artifact allocation, but it does not belong under
+`src/fastdyn`.
 
 ## Testing RTOS introspection without RTOS submodules
 

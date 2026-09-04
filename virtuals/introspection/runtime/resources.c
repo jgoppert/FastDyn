@@ -1,4 +1,5 @@
-/*
+/* Native RTOS resource introspection runtime.
+ *
  * Resource-level introspection callbacks shared by RTOS adapters.
  *
  * Resource initialization APIs across the supported RTOSes use their first

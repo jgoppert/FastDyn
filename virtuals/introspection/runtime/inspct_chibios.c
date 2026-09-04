@@ -1,4 +1,5 @@
-/*
+/* Native ChibiOS introspection runtime.
+ *
  * ChibiOS/RT external introspection hooks.
  * Hook __trace_switch for context switches, __thd_object_init for thread
  * registration, and dump the ready list via ch_system -> os_instance -> rlist.
@@ -27,8 +28,6 @@ typedef struct {
     uint32_t owner;
 } ChibiOSThreadState;
 
-static ChibiOSThreadState all_threads[64];
-static size_t all_threads_count = 0;
 
 /* Try both possible DWARF struct names for the thread descriptor */
 static const char *const thread_struct_names[] = { "ch_thread", "thread_t", NULL };
@@ -82,66 +81,11 @@ void inspct_chibios_trace_switch(unsigned int cpu_idx, void *arg) {
     if (!chibios_extract_thread_info(ntp, &in_task) ||
         !chibios_extract_thread_info(otp, &out_task))
     {
-        fprintf(stderr, "[ChibiOS] Failed to extract thread info for switch: ntp=0x%08X otp=0x%08X\n", ntp, otp);
         return;
     }
 
-    printf("[ChibiOS] Switch out: %s (Prio %u) -> in: %s (Prio %u) | ntp=0x%08X otp=0x%08X\n",
-           out_task.name[0] ? out_task.name : "(null)",
-           (unsigned)out_task.priority,
-           in_task.name[0] ? in_task.name : "(null)",
-           (unsigned)in_task.priority,
-           ntp, otp);
     inspct_activity_emit("ChibiOS", "task_switch", in_task.thread_addr,
                          in_task.name, (int32_t)in_task.priority);
-
-    // if new name add to all_threads
-    bool found = false;
-    for (size_t i = 0; i < all_threads_count; i++) {
-        if (all_threads[i].thread_addr == in_task.thread_addr) {
-            found = true;
-            if (strcmp(all_threads[i].name, in_task.name) != 0) {
-                // append the name change to a file
-                FILE *f = fopen("threads_copter.txt", "a");
-                if (f) {
-                    fprintf(f, "Thread 0x%08X renamed: %s -> %s\n",
-                            in_task.thread_addr,
-                            all_threads[i].name[0] ? all_threads[i].name : "(null)",
-                            in_task.name[0] ? in_task.name : "(null)");
-                    fclose(f);
-                }
-            }
-            // if priority changed, log it
-            if (all_threads[i].priority != in_task.priority) {
-                FILE *f = fopen("threads_copter.txt", "a");
-                if (f) {
-                    fprintf(f, "Thread %s priority changed: %u -> %u\n",
-                            in_task.name[0] ? in_task.name : "(null)",
-                            (unsigned)all_threads[i].priority,
-                            (unsigned)in_task.priority);
-                    fclose(f);
-                }
-            }
-
-            all_threads[i] = in_task;
-            break;
-        }
-    }
-    if (!found && all_threads_count < sizeof(all_threads) / sizeof(all_threads[0])) {
-        all_threads[all_threads_count++] = in_task;
-        // append the name to a file
-        FILE *f = fopen("threads_copter.txt", "a");
-        if (f) {
-            fprintf(f, "New thread: %s, Prio: %u\n", in_task.name[0] ? in_task.name : "(null)", (unsigned)in_task.priority);
-            fclose(f);
-        }
-    }
-
-    uint32_t ch_system_addr = inspct_get_symbol("ch_system");
-    if (ch_system_addr != 0)
-        inspct_chibios_dump_ready_list(ch_system_addr);
-
-    fflush(stdout);
 }
 
 /* Thread creation: __thd_object_init(oip, tp, name, prio) — R0=oip, R1=tp, R2=name, R3=prio */
@@ -155,17 +99,13 @@ void inspct_chibios_thd_object_init(unsigned int cpu_idx, void *arg) {
     ChibiOSThreadState task;
     if (!chibios_extract_thread_info(tp, &task)) return;
 
-    printf("[ChibiOS] [+] New thread registered: %s | Prio: %u | thread_t=0x%08X\n",
-           task.name[0] ? task.name : "(null)",
-           (unsigned)task.priority,
-           tp);
     inspct_activity_emit("ChibiOS", "task_created", task.thread_addr,
                          task.name, (int32_t)task.priority);
-    fflush(stdout);
 }
 
 /* Walk the ready list (priority queue) of one OS instance. Each element is
  * thread_t.hdr.pqueue; list header is rlist.pqueue. */
+#if 0 /* Legacy terminal-only ready-list dump; activity.jsonl replaces it. */
 static void chibios_walk_ready_pqueue(uint32_t pqueue_header_addr, uint32_t current_tp,
                                       const char *inst_label) {
     /* thread_t.hdr.pqueue offset. Schema often has only "hdr" (union); then hdr.pqueue is missing and we use 0. */
@@ -229,6 +169,7 @@ void inspct_chibios_dump_ready_list(uint32_t ch_system_addr) {
     printf("[ChibiOS] =================================\n");
     fflush(stdout);
 }
+#endif
 
 
 int inspct_chibios_init(int argc, char ** argv){

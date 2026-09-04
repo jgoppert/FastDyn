@@ -125,12 +125,10 @@ binary = "virtuals/physics/flight_controllers/courbet/bin/arducopter_v462"
 init_nsvtor = "0x08004000"
 twintrace = "None"
 hardware_trace = "hardware_log/io.log"
-introspect = false
 existing_config_path = "virtuals/physics/flight_controllers/courbet/copter462/unlabeled_conf"
 ```
 
-`introspect = true` is retained as a compatibility shorthand. New run modules
-use FastDyn's generic per-CPU plugin configuration namespace instead:
+Run modules use FastDyn's generic per-CPU plugin configuration namespace:
 
 ```toml
 [CPU.cpu0.plugins.introspection]

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from fastdyn.binary.schema_gen import SchemaGenerator
-from fastdyn.introspect.introspector_base import RTOSIntrospector
+from ..introspector_base import RTOSIntrospector
 
 
 @dataclass(frozen=True)
@@ -179,13 +179,18 @@ _register(
 _register(
     "NuttX",
     RTOSSchemaSpec(
-        hooks=("up_switch_context", "nxsched_add_readytorun", "nx_start"),
+        # This is NuttX's scheduler-to-architecture context-switch boundary.
+        # Its AAPCS arguments are ``from`` (R0) and ``to`` (R1), so a
+        # prologue hook records every actual selected-task transition.  Queue
+        # mutation helpers are deliberately not scheduler events: they may
+        # run without switching the processor to a different task.
+        hooks=("nxsched_switch_context",),
         resource_hooks=(
             "nxsem_init", "nxmutex_init", "wd_create",
             "nxsem_wait", "nxsem_post", "nxmutex_lock", "nxmutex_unlock",
             "wd_start", "wd_cancel",
         ),
         structs=("tcb_s", "dq_queue_s"),
-        symbols=("g_readytorun",),
+        symbols=("g_readytorun", "g_idletcb"),
     ),
 )

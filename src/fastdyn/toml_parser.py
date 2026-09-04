@@ -288,7 +288,6 @@ def parser(out_dir, machine_name, toml_config, svd_path, fmu_name=None, load_fmu
                 init_nsvtor= curr_cpu.get("init_nsvtor", None),
                 twintrace = curr_cpu.get("twintrace", None),
                 hardware_trace = curr_cpu.get("hardware_trace", None),
-                introspect = curr_cpu.get("introspect", False),
                 exstng_config_path = _resolve_existing_config_path(
                     toml_config,
                     curr_cpu.get("existing_config_path", False),
@@ -306,9 +305,7 @@ def parser(out_dir, machine_name, toml_config, svd_path, fmu_name=None, load_fmu
         cpu_obj.logger_content  =   curr_cpu.get("logger_content", cpu_obj.logger_content)
 
         # Run-wide modules are configured under a generic per-CPU namespace.
-        # FastDyn preserves the table without knowing plugin names or their
-        # settings. ``introspect = true`` remains a compatibility spelling for
-        # the built-in introspection module's enabled setting.
+        # FastDyn preserves the table without knowing plugin names or settings.
         raw_plugins = curr_cpu.get("plugins", {})
         if not isinstance(raw_plugins, dict):
             raise TypeError("[CPU.cpu0.plugins] must be a table")
@@ -319,12 +316,7 @@ def parser(out_dir, machine_name, toml_config, svd_path, fmu_name=None, load_fmu
                     f"[CPU.cpu0.plugins.{plugin_name}] must be a table"
                 )
             plugin_config[str(plugin_name)] = dict(plugin_settings)
-        if bool(curr_cpu.get("introspect", False)):
-            plugin_config.setdefault("introspection", {}).setdefault("enabled", True)
         cpu_obj.plugin_config = plugin_config
-        cpu_obj.introspect = bool(
-            plugin_config.get("introspection", {}).get("enabled", False)
-        )
 
         #symbol resolution per cpu
 		#if curr_cpu.get("map_file") is not None:

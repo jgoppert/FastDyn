@@ -1,3 +1,5 @@
+"""Generic RTOS hook construction support for the introspection host code."""
+
 from abc import ABC, abstractmethod
 import capstone
 from elftools.elf.elffile import ELFFile

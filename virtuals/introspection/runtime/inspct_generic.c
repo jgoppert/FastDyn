@@ -1,4 +1,5 @@
-/*
+/* Native generic RTOS introspection runtime.
+ *
  * Common event-level RTOS introspection callbacks.
  *
  * Layout-sensitive task walking belongs in a dedicated implementation (as it
@@ -123,11 +124,39 @@ void inspct_rtthread_event(unsigned int cpu_index, void *arg) {
     report_event("RT-Thread", "scheduler event", rtthread_current());
 }
 
-void inspct_nuttx_event(unsigned int cpu_index, void *arg) {
+static void report_nuttx_switch(uint32_t from, uint32_t task) {
+    char name[33] = {0};
+    uint8_t priority = 0;
+    /* tcb_s.task_state is a 32-bit DWARF field in the supported NuttX
+     * builds. Match its schema width: reading it into a byte overwrote the
+     * following activity-field metadata. */
+    uint32_t state = 0;
+    InspctActivityField fields[] = {{"previous_tcb", from}};
+    if (task == 0) {
+        return;
+    }
+    (void)inspct_get_field("tcb_s", task, "name", name);
+    (void)inspct_get_field("tcb_s", task, "sched_priority", &priority);
+    (void)inspct_get_field("tcb_s", task, "task_state", &state);
+    inspct_activity_emit_task_fields("NuttX", "task_switch", task,
+                                     name[0] ? name : NULL, priority,
+                                     (int32_t)state, fields,
+                                     sizeof(fields) / sizeof(fields[0]));
+}
+
+void inspct_nuttx_switch(unsigned int cpu_index, void *arg) {
     (void)cpu_index; (void)arg;
-    /* g_readytorun is a queue header. The first pointer is its head on the
-     * supported NuttX layouts, and identifies the runnable current task. */
-    report_event("NuttX", "scheduler event", global_current("g_readytorun"));
+    /* NuttX declares nxsched_switch_context(from, to).  This is an ARM
+     * AAPCS target, so FastDyn can read the authoritative task transition
+     * directly from R0/R1 at the function prologue. */
+    report_nuttx_switch(qemu_get_register(0), qemu_get_register(1));
+}
+
+void inspct_nuttx_lifecycle(unsigned int cpu_index, void *arg) {
+    (void)cpu_index; (void)arg;
+    /* Kept only for old generated virtuals. New configurations do not
+     * mistake startup or ready-queue maintenance for a context switch. */
+    report_event("NuttX", "scheduler started", global_current("g_readytorun"));
 }
 
 int inspct_generic_init(int argc, char **argv) {
@@ -150,8 +179,10 @@ int inspct_generic_init(int argc, char **argv) {
     virtual_register("rt_schedule_Hook", inspct_rtthread_event);
     virtual_register("rt_thread_create_Hook", inspct_rtthread_event);
     virtual_register("rt_thread_self_Hook", inspct_rtthread_event);
-    virtual_register("up_switch_context_Hook", inspct_nuttx_event);
-    virtual_register("nxsched_add_readytorun_Hook", inspct_nuttx_event);
-    virtual_register("nx_start_Hook", inspct_nuttx_event);
+    virtual_register("nxsched_switch_context_Hook", inspct_nuttx_switch);
+    /* nx_start remains a normal lifecycle hook emitted by older/generated
+     * configurations. Keep it registered for compatibility, but do not
+     * classify lifecycle as a task switch. */
+    virtual_register("nx_start_Hook", inspct_nuttx_lifecycle);
     return 0;
 }
