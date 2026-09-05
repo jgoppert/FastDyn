@@ -1,5 +1,6 @@
 
 subdir('introspection')
+subdir('function_counter')
 
 if get_option('enable_phy')
     subdir('physics')

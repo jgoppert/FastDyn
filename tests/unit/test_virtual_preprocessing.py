@@ -31,8 +31,12 @@ class _Cpu:
     cpu = "cortex-m4"
     symbol_dict = {"main": 0x08000101}
 
-    def __init__(self, *, plugin_enabled=False, irq_map=None):
-        self.plugin_config = {"introspection": {"enabled": True}} if plugin_enabled else {}
+    def __init__(self, *, plugin_enabled=False, plugin_config=None, irq_map=None):
+        self.plugin_config = (
+            plugin_config
+            if plugin_config is not None
+            else ({"introspection": {"enabled": True}} if plugin_enabled else {})
+        )
         self.machine_obj = _MachineContext(irq_map)
 
 
@@ -146,6 +150,23 @@ def test_run_preprocessor_results_remain_declarative(monkeypatch, tmp_path):
 def test_run_preprocessor_cannot_return_plugin_command_line_arguments():
     with pytest.raises(TypeError, match="plugin_args"):
         RunPrepareResult(plugin_args={"untrusted": "value"})
+
+
+def test_function_counter_plugin_generates_one_entry_virtual_per_elf_function(tmp_path):
+    cpu = _Cpu(plugin_config={"function_counter": {"enabled": True}})
+    cpu.binary = str(Path("tests/binaries/rtos/zephyr.elf").resolve())
+    machine = _Machine(cpu)
+
+    prepare_run_preprocessors(machine, tmp_path)
+
+    generated = machine.generated_virtual_rules[id(cpu)]
+    rules = [rule.virtual for rule in generated if rule.origin == "function_counter"]
+    assert "function_counter" in VIRTUAL_DEFINITIONS
+    assert len(rules) > 100
+    assert all(rule.instruction == "function_counter" for rule in rules)
+    assert len({rule.at for rule in rules}) == len(rules)
+    manifest = tmp_path / "run-artifacts" / "function_counter" / "functions.tsv"
+    assert "z_arm_pendsv" in manifest.read_text(encoding="utf-8")
 
 
 def test_toml_plugin_settings_are_passed_without_frontend_feature_dispatch(tmp_path):

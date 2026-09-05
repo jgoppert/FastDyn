@@ -18,6 +18,11 @@ The public Python contract is described in
 [VirtualPreprocessing.md](VirtualPreprocessing.md). This page is the practical
 recipe for using it safely.
 
+For a compact, runnable run-preprocessor implementation, see the
+[function-counter plugin](FunctionCounterPlugin.md). It discovers ELF
+functions, emits one entry virtual per function, and writes aggregate counts
+without any feature-specific frontend or QEMU command-line handling.
+
 ## Choose the smallest extension
 
 | Need | Implement |

@@ -28,6 +28,7 @@
 #include <virtuals.h>
 #include <probe.h>
 #include "introspection/runtime/inspct.h"
+#include "function_counter/runtime/function_counter.h"
 // #include "ardupilot_virtuals.c"
 #if ENABLE_LIBGZ
     #include "phy.h"
@@ -684,6 +685,8 @@ int virtuals_init(int argc, char **argv, const char *schema_path) {
 		// Initialize subcomponents, each compnoent can fail independently so no reason to stop initiliaztion if one fails
 		if ((status = inspct_init(argc, argv, schema_path)) < 0)
 				utils_warn("Introspection failed");
+		if ((status = function_counter_init()) < 0)
+				utils_warn("Function counter failed");
 #if ENABLE_PHY
         // It is ok to conditonally initialize here since sim_time is only used when PHY is enabled
 		if ((status = shared_sim_time_init() < 0)) {

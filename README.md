@@ -76,6 +76,8 @@ debug-symbol FreeRTOS ELF, see
   configurations and their bundled debug-symbol test binaries.
 - `docs/WritingVirtuals.md`: contributor guide for implementing, registering,
   testing, and configuring a new native virtual or preprocessing module.
+- `docs/FunctionCounterPlugin.md`: a runnable, self-contained example of a
+  run preprocessor that instruments ELF function entries and writes counts.
 - `virtuals/physics/README.md`: maintained Rumoca FMI v3 physics path,
   mission assets, timing semantics, and legacy Gazebo notes.
 - `virtuals/physics/flight_controllers/courbet/README.md`: Courbet/ArduPilot

@@ -12,7 +12,8 @@
 #define MAX_LISTS 100
 #define MAX_ENTRIES 1024
 #define MAX_LINE_LEN 128
-#define MAX_RULES 256
+/* Run-wide instrumentation may install one virtual at every function entry. */
+#define MAX_RULES 4096
 #define LINE_BUFFER_SIZE 1024
 
 // ARM register constants
