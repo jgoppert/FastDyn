@@ -1,14 +1,11 @@
 /* Function-entry counter runtime for the educational preprocessing plugin. */
-#include "function_counter.h"
-
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <core.h>
-#include <virtuals.h>
+#include <fastdyn_runtime.h>
 
 #define FUNCTION_COUNTER_MAX_FUNCTIONS 4096
 #define FUNCTION_NAME_MAX 256
@@ -22,6 +19,7 @@ typedef struct {
 static FunctionCounter counters[FUNCTION_COUNTER_MAX_FUNCTIONS];
 static size_t counter_count;
 static int counter_active;
+static const VirtualContext *runtime_context;
 
 static FunctionCounter *find_counter(const char *name) {
     size_t index;
@@ -48,12 +46,12 @@ static int add_counter(uint64_t address, const char *name) {
     return 0;
 }
 
-static int load_manifest(void) {
+static int load_manifest(const VirtualContext *ctx) {
     char path[4096];
     char line[512];
     FILE *stream;
-    if (core_get_run_artifact_path("function_counter/functions.tsv", path,
-                                   sizeof(path)) != 0) {
+    if (virtual_artifact_path(ctx, "functions.tsv", path,
+                                      sizeof(path)) != 0) {
         return 0;
     }
     stream = fopen(path, "r");
@@ -94,8 +92,8 @@ static void write_counts(void) {
     FILE *stream;
     size_t index;
     if (!counter_active
-        || core_get_run_artifact_path("function_counter/counts.tsv", path,
-                                      sizeof(path)) != 0) {
+        || virtual_artifact_path(runtime_context, "counts.tsv", path,
+                                         sizeof(path)) != 0) {
         return;
     }
     stream = fopen(path, "w");
@@ -126,18 +124,21 @@ static void function_counter(unsigned int cpu_index, void *userdata) {
     }
 }
 
-int function_counter_init(void) {
+static int function_counter_runtime_init(const VirtualContext *ctx) {
     int loaded;
-    if (virtual_register("function_counter", function_counter) != 0) {
+    runtime_context = ctx;
+    if (virtual_register_callback(ctx, "function_counter", function_counter) != 0) {
         return -1;
     }
-    loaded = load_manifest();
+    loaded = load_manifest(ctx);
     if (loaded < 0) {
         return -1;
     }
     if (loaded > 0) {
         counter_active = 1;
-        core_register_exit_hook(write_counts);
+        virtual_register_exit(ctx, write_counts);
     }
     return 0;
 }
+
+VIRTUAL_PLUGIN("function_counter", function_counter_runtime_init);

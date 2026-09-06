@@ -44,26 +44,50 @@ signature is defined by `cb_func_t` in `include/common.h`:
 static void example_virtual(unsigned int cpu_index, void *userdata)
 {
     const char *args = userdata;  /* the prepared, space-joined arguments */
-    /* Perform the runtime action with the QEMU plugin API. */
+    /* Perform the runtime action through virtual_*(). */
 }
 ```
 
-For a built-in callback, declare it in `include/virtuals.h` and add its name
-and function to the `cb_registry` table in `virtuals/virtuals.c`:
+For a compiled-in feature, use the public C runtime SDK in
+`include/fastdyn_runtime.h`. A module declares one initializer; FastDyn finds
+the declaration generically after its callback registry and artifact root are
+ready:
 
 ```c
-{ "example_virtual", example_virtual },
+#include <fastdyn_runtime.h>
+
+static int example_runtime_init(const VirtualContext *ctx)
+{
+    char output[4096];
+    if (virtual_register_callback(ctx, "example_virtual",
+                                         example_virtual) != 0) {
+        return -1;
+    }
+    if (virtual_artifact_path(ctx, "results.tsv", output,
+                                      sizeof(output)) != 0) {
+        return -1;
+    }
+    virtual_register_exit(ctx, example_write_results);
+    return 0;
+}
+
+VIRTUAL_PLUGIN("example", example_runtime_init);
 ```
 
-The string is the public instruction name. It must exactly match the Python
-`VirtualDefinition` name and the TOML `instruction` value. Build the FastDyn
-plugin after changing native sources; an unmodified `libfastdyn.so` cannot run
-the new callback.
+The module name namespaces `results.tsv` below
+`run-artifacts/example/`. The SDK is the only supported route for registering
+callbacks, resolving module artifacts, and registering shutdown work. Do not
+add a callback to `cb_registry`, call `virtual_register()` directly, inspect
+QEMU/plugin arguments, or add an initializer call in `virtuals/virtuals.c`.
 
-Runtime feature modules that are already linked into the plugin can call
-`virtual_register("example_virtual", example_virtual)` during their own
-initialization instead. Do not call it for a callback already in `cb_registry`:
-duplicate names are rejected.
+The public callback name must exactly match the Python `VirtualDefinition` and
+TOML instruction name. Build `libfastdyn.so` after changing native sources.
+[`virtuals/README.md`](../virtuals/README.md) is the complete native API
+reference, including guest memory/register access, PC/SP/time access, IRQ and
+translation hooks, and dynamically-created virtual rules and modifiers.
+For register operations, include the header for the guest architecture (for
+example `<fastdyn/arch/arm_v7m.h>` or `<fastdyn/arch/riscv64.h>`); never embed
+an undocumented register number.
 
 The callback receives a single string, not a Python object. Validate and parse
 that string defensively in C even if a Python preprocessor also validates it.

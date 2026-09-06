@@ -1,4 +1,6 @@
 
+srcs += files('runtime_sdk.c')
+
 subdir('introspection')
 subdir('function_counter')
 

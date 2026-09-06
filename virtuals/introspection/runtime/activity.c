@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include <qemu/qemu-plugin.h>
-#include <core.h>
+#include <fastdyn_runtime.h>
 
 static FILE *activity_stream;
 
@@ -47,9 +47,9 @@ static void json_fields(const InspctActivityField *fields, size_t field_count) {
     fputc('}', activity_stream);
 }
 
-int inspct_activity_init(void) {
+int inspct_activity_init(const VirtualContext *ctx) {
     char path[4096];
-    if (core_get_run_artifact_path("introspection/activity.jsonl", path, sizeof(path)) != 0) {
+    if (virtual_artifact_path(ctx, "activity.jsonl", path, sizeof(path)) != 0) {
         return 0;
     }
     activity_stream = fopen(path, "a");

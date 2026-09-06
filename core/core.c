@@ -68,10 +68,7 @@ size_t listCount = 0;
 
 twintrace_mode_t twintrace_mode = TT_OFF;
 const char *twintrace_bin_path = NULL;
-int introspection_enabled = 0;
-const char *introspection_schema_path = NULL;
 static char run_artifacts_root[PATH_MAX];
-static char introspection_schema_buffer[PATH_MAX];
 
 /**
  * @brief Parses a token string into a logger entry.
@@ -1201,23 +1198,9 @@ int core_get_run_artifact_path(const char *relative, char *out, size_t out_size)
     return 0;
 }
 
-static void prepare_introspection(int argc, char **argv) {
+static void prepare_runtime_plugins(int argc, char **argv) {
     core_init_run_artifacts_root(argc, argv);
-    introspection_enabled = 0;
-    introspection_schema_path = NULL;
-
-    /* The Python feature is enabled only from TOML.  If it prepared its
-     * schema artifact, the native component finds it through the generic run
-     * artifact API; no feature-specific QEMU option is accepted here. */
-    if (core_get_run_artifact_path("introspection/schema.txt",
-                                   introspection_schema_buffer,
-                                   sizeof(introspection_schema_buffer)) == 0
-        && access(introspection_schema_buffer, R_OK) == 0) {
-        introspection_enabled = 1;
-        introspection_schema_path = introspection_schema_buffer;
-    }
-
-    virtuals_init(argc, argv, introspection_schema_path);
+    virtuals_init(argc, argv);
 }
 
 void parse_rules_file(const char *filename);
@@ -1280,8 +1263,8 @@ static void print_rules(void) {
 #endif
 static int core_parse_arguments(int argc, char ** argv) {
 
-	/* Run-wide components obtain only FastDyn-managed artifacts. */
-    prepare_introspection(argc, argv);
+	/* Runtime plugins obtain only namespaced FastDyn-managed artifacts. */
+    prepare_runtime_plugins(argc, argv);
 	const char *filename= utils_get_arg("detour", argc, argv);
     if (filename) {
             num_tuples = read_tuples_from_file(filename, address_tuples, MAX_TUPLES);

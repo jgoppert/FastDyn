@@ -1,0 +1,225 @@
+/* Generic runtime-plugin dispatcher and public SDK implementation. */
+#include <fastdyn_runtime.h>
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <core.h>
+#include <virtuals.h>
+
+extern const VirtualPlugin __start_virtual_plugins[];
+extern const VirtualPlugin __stop_virtual_plugins[];
+
+#define VIRTUAL_RUNTIME_MAX_PLUGINS 64
+static VirtualContext runtime_contexts[VIRTUAL_RUNTIME_MAX_PLUGINS];
+
+static int valid_relative_path(const char *relative) {
+    return relative && relative[0] && relative[0] != '/'
+        && strstr(relative, "..") == NULL;
+}
+
+int virtual_register_callback(const VirtualContext *ctx,
+                                     const char *name, cb_func_t callback) {
+    (void)ctx;
+    return virtual_register(name, callback);
+}
+
+int virtual_artifact_path(const VirtualContext *ctx,
+                                  const char *relative, char *out,
+                                  size_t out_size) {
+    char namespaced[512];
+    if (!ctx || !ctx->plugin_name || !ctx->plugin_name[0]
+        || !valid_relative_path(relative)
+        || snprintf(namespaced, sizeof(namespaced), "%s/%s", ctx->plugin_name,
+                    relative) >= (int)sizeof(namespaced)) {
+        return -1;
+    }
+    return core_get_run_artifact_path(namespaced, out, out_size);
+}
+
+void virtual_register_exit(const VirtualContext *ctx,
+                                   VirtualExitCallback callback) {
+    (void)ctx;
+    if (callback) {
+        core_register_exit_hook(callback);
+    }
+}
+
+void virtual_log(const VirtualContext *ctx, VirtualLogLevel level,
+                 const char *format, ...) {
+    static const char *const labels[] = { "DEBUG", "INFO", "WARN", "ERROR" };
+    va_list args;
+    const char *plugin = (ctx && ctx->plugin_name) ? ctx->plugin_name : "unknown";
+    const char *label = (level >= VIRTUAL_LOG_DEBUG && level <= VIRTUAL_LOG_ERROR)
+                        ? labels[level] : "UNKNOWN";
+
+    if (!format) {
+        return;
+    }
+    fprintf(stderr, "FASTDYN_VIRTUAL|%s|%s| ", label, plugin);
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputc('\n', stderr);
+    fflush(stderr);
+}
+
+uint64_t virtual_pc(const VirtualContext *ctx) {
+    (void)ctx;
+    return core_get_pc();
+}
+
+uint64_t virtual_sp(const VirtualContext *ctx) {
+    (void)ctx;
+    return core_get_sp();
+}
+
+uint64_t virtual_icount(const VirtualContext *ctx) {
+    (void)ctx;
+    return core_get_icount();
+}
+
+uint64_t virtual_guest_time_ns(const VirtualContext *ctx) {
+    (void)ctx;
+    return qemu_plugin_get_virtual_timer();
+}
+
+int virtual_read_register_bytes(const VirtualContext *ctx,
+                                        int reg, void *buffer,
+                                        size_t buffer_size,
+                                        size_t *value_size) {
+    GArray *descriptors;
+    qemu_plugin_reg_descriptor *descriptor;
+    GByteArray *value;
+    int result;
+
+    (void)ctx;
+    if (!buffer || !value_size || reg < 0) {
+        return -1;
+    }
+    descriptors = qemu_plugin_get_registers();
+    if (!descriptors || (guint)reg >= descriptors->len) {
+        if (descriptors) {
+            g_array_free(descriptors, TRUE);
+        }
+        return -1;
+    }
+    descriptor = &g_array_index(descriptors, qemu_plugin_reg_descriptor, reg);
+    value = g_byte_array_sized_new(buffer_size);
+    result = qemu_plugin_read_register(descriptor->handle, value);
+    if (result < 0 || (size_t)result > buffer_size) {
+        g_byte_array_free(value, TRUE);
+        g_array_free(descriptors, TRUE);
+        return -1;
+    }
+    memcpy(buffer, value->data, (size_t)result);
+    *value_size = (size_t)result;
+    g_byte_array_free(value, TRUE);
+    g_array_free(descriptors, TRUE);
+    return 0;
+}
+
+int virtual_write_register_bytes(const VirtualContext *ctx,
+                                         int reg, const void *buffer,
+                                         size_t size) {
+    (void)ctx;
+    if (!buffer || reg < 0 || size == 0) {
+        return -1;
+    }
+    qemu_plugin_set_register((uint8_t *)buffer, reg);
+    return 0;
+}
+
+uint32_t virtual_read_register(const VirtualContext *ctx, int reg) {
+    (void)ctx;
+    return qemu_get_register(reg);
+}
+
+void virtual_write_register(const VirtualContext *ctx, int reg,
+                                    uint32_t value) {
+    (void)ctx;
+    qemu_set_register(value, reg);
+}
+
+int virtual_read_memory(const VirtualContext *ctx,
+                                uintptr_t address, size_t size, void *buffer) {
+    (void)ctx;
+    return core_read_ram(address, size, buffer);
+}
+
+int virtual_write_memory(const VirtualContext *ctx,
+                                 uintptr_t address, size_t size,
+                                 const void *buffer) {
+    (void)ctx;
+    return core_write_ram(address, size, buffer);
+}
+
+void virtual_raise_irq(const VirtualContext *ctx, int irq,
+                               bool level) {
+    (void)ctx;
+    qemu_plugin_raise_irq(irq, level);
+}
+
+void virtual_register_irq_hook(const VirtualContext *ctx,
+                                       VirtualIrqCallback entry,
+                                       VirtualIrqCallback exit) {
+    (void)ctx;
+    core_register_irq_hook(entry, exit);
+}
+
+void virtual_register_tb_translation_hook(
+    const VirtualContext *ctx, VirtualTbTranslationHook callback) {
+    (void)ctx;
+    core_register_tb_trans_hook(callback);
+}
+
+bool virtual_register_rule(const VirtualContext *ctx,
+                                           uint64_t address, cb_func_t callback,
+                                           const char *args) {
+    (void)ctx;
+    return core_register_virtual_rule(address, callback, args);
+}
+
+bool virtual_register_update(const VirtualContext *ctx,
+                                     uint64_t address, int reg,
+                                     uint64_t value) {
+    (void)ctx;
+    return core_register_register_update(address, reg, value);
+}
+
+bool virtual_register_gated_modifier(const VirtualContext *ctx,
+                                             uint64_t address, const char *patch,
+                                             const volatile uint8_t *enabled) {
+    (void)ctx;
+    return core_register_gated_modifier(address, patch, enabled);
+}
+
+void virtual_wait_for_trace_drain(const VirtualContext *ctx) {
+    (void)ctx;
+    core_wait_for_trace_drain();
+}
+
+int virtual_initialize_plugins(void) {
+    const VirtualPlugin *plugin;
+    size_t index = 0;
+    int failures = 0;
+    for (plugin = __start_virtual_plugins;
+         plugin < __stop_virtual_plugins; ++plugin) {
+        if (!plugin->name || !plugin->initialize) {
+            continue;
+        }
+        if (index >= VIRTUAL_RUNTIME_MAX_PLUGINS) {
+            fprintf(stderr, "fastdyn: too many runtime plugins\n");
+            return -1;
+        }
+        runtime_contexts[index].plugin_name = plugin->name;
+        if (plugin->initialize(&runtime_contexts[index]) < 0) {
+            fprintf(stderr, "fastdyn: runtime plugin '%s' failed to initialize\n",
+                    plugin->name);
+            failures++;
+        }
+        index++;
+    }
+    return failures ? -1 : 0;
+}

@@ -76,8 +76,8 @@ The implementation deliberately uses only the documented plugin boundary:
   `plugin_artifact_path()` allocates `functions.tsv` and `counts.tsv`.
 - The preprocessor returns declarative `VirtualInstruction` values. It never
   edits `virtuals.txt`, mutates frontend state, or adds a QEMU argument.
-- The native callback locates its manifest and output through
-  `core_get_run_artifact_path()`; the QEMU command line remains plugin-agnostic.
+- The native callback locates its manifest and output through the namespaced
+  C runtime SDK; the QEMU command line remains plugin-agnostic.
 
 To create another compiled-in feature, use the same layout:
 

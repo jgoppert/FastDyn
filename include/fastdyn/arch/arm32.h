@@ -1,0 +1,43 @@
+#ifndef FASTDYN_ARCH_ARM32_H
+#define FASTDYN_ARCH_ARM32_H
+
+/*
+ * ARM A/R-profile GDB register indices used by FastDyn's native runtime API.
+ * These are QEMU GDB-stub indices, not host CPU register numbers.
+ */
+enum {
+    VIRTUAL_ARM32_R0 = 0,
+    VIRTUAL_ARM32_R1 = 1,
+    VIRTUAL_ARM32_R2 = 2,
+    VIRTUAL_ARM32_R3 = 3,
+    VIRTUAL_ARM32_R4 = 4,
+    VIRTUAL_ARM32_R5 = 5,
+    VIRTUAL_ARM32_R6 = 6,
+    VIRTUAL_ARM32_R7 = 7,
+    VIRTUAL_ARM32_R8 = 8,
+    VIRTUAL_ARM32_R9 = 9,
+    VIRTUAL_ARM32_R10 = 10,
+    VIRTUAL_ARM32_R11 = 11,
+    VIRTUAL_ARM32_R12 = 12,
+    VIRTUAL_ARM32_SP = 13,
+    VIRTUAL_ARM32_LR = 14,
+    VIRTUAL_ARM32_PC = 15,
+    VIRTUAL_ARM32_CPSR = 25,
+};
+
+/* AAPCS integer calling-convention conveniences. */
+#ifdef VIRTUAL_ABI_CONVENIENCE_DEFINED
+#error "Include exactly one architecture ABI header per runtime module"
+#endif
+#define VIRTUAL_ABI_CONVENIENCE_DEFINED 1
+#define VIRTUAL_ARGUMENT_COUNT 4
+#define VIRTUAL_FIRST_ARG VIRTUAL_ARM32_R0
+#define VIRTUAL_SECOND_ARG VIRTUAL_ARM32_R1
+#define VIRTUAL_THIRD_ARG VIRTUAL_ARM32_R2
+#define VIRTUAL_FOURTH_ARG VIRTUAL_ARM32_R3
+#define VIRTUAL_RETURN_VALUE VIRTUAL_ARM32_R0
+#define VIRTUAL_STACK_POINTER VIRTUAL_ARM32_SP
+#define VIRTUAL_PROGRAM_COUNTER VIRTUAL_ARM32_PC
+#define VIRTUAL_LINK_REGISTER VIRTUAL_ARM32_LR
+
+#endif

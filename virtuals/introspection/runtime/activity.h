@@ -5,13 +5,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <fastdyn_runtime.h>
+
 /* A JSONL event stream consumed by FastDyn's optional browser monitor. */
 typedef struct {
     const char *name;
     uint32_t value;
 } InspctActivityField;
 
-int inspct_activity_init(void);
+int inspct_activity_init(const VirtualContext *ctx);
 void inspct_activity_close(void);
 void inspct_activity_emit(const char *rtos, const char *event, uint32_t task,
                           const char *task_name, int32_t priority);

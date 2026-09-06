@@ -27,14 +27,11 @@
 #endif
 #include <virtuals.h>
 #include <probe.h>
-#include "introspection/runtime/inspct.h"
-#include "function_counter/runtime/function_counter.h"
+#include <fastdyn_runtime.h>
 // #include "ardupilot_virtuals.c"
 #if ENABLE_LIBGZ
     #include "phy.h"
 #endif
-
-#include "introspection/runtime/inspct.h"
 
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -55,7 +52,6 @@ static uint64_t periodic_irq_period_ns = 1000000ULL;
 #include "../python/python.c"
 #endif
 
-#include <virtuals/inspct.h>
 #include <virtuals/virt_fuzz.h>
 #include <virtuals/phy.h>
 
@@ -660,7 +656,7 @@ int virtual_register(const char *name, cb_func_t func) {
     return 0;
 }
 
-int virtuals_init(int argc, char **argv, const char *schema_path) {
+int virtuals_init(int argc, char **argv) {
 	int status = -1;
     const char *timer_period_arg = utils_get_arg("timer_irq_period_ns", argc, argv);
     if (timer_period_arg && timer_period_arg[0] != '\0') {
@@ -682,11 +678,9 @@ int virtuals_init(int argc, char **argv, const char *schema_path) {
 	}
 
     if (status != -1) {
-		// Initialize subcomponents, each compnoent can fail independently so no reason to stop initiliaztion if one fails
-		if ((status = inspct_init(argc, argv, schema_path)) < 0)
-				utils_warn("Introspection failed");
-		if ((status = function_counter_init()) < 0)
-				utils_warn("Function counter failed");
+        /* Compiled-in virtual modules self-register through the public runtime SDK. */
+		if ((status = virtual_initialize_plugins()) < 0)
+				utils_warn("One or more runtime plugins failed to initialize");
 #if ENABLE_PHY
         // It is ok to conditonally initialize here since sim_time is only used when PHY is enabled
 		if ((status = shared_sim_time_init() < 0)) {

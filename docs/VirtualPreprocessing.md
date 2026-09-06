@@ -151,11 +151,12 @@ hard boundary: a module cannot extend FastDyn's command line, including by
 returning a prepared result. User-controlled feature settings belong in TOML;
 preprocessors may turn those settings into artifacts.
 
-Native modules obtain artifacts through FastDyn's generic run-artifact API,
-addressed by a logical relative name such as `introspection/schema.txt`. The
-frontend manages the actual work directory, and no generated path is passed as
-a command-line option. This keeps the QEMU launch surface owned solely by
-FastDyn.
+Native modules receive the matching namespaced C runtime context from
+`include/fastdyn_runtime.h`. They resolve a local name such as `schema.txt`
+through `fastdyn_runtime_artifact_path()`, never through a global work path or
+plugin argument. The frontend manages the actual work directory, and no
+generated path is passed as a command-line option. This keeps the QEMU launch
+surface owned solely by FastDyn.
 
 ## RTOS introspection
 

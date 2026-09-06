@@ -209,14 +209,70 @@ setting = "from-toml"
     }
 
 
-def test_native_introspection_uses_the_generic_artifact_api_not_plugin_arguments():
+def test_native_plugins_use_the_runtime_sdk_not_plugin_arguments_or_core_dispatch():
     source = Path("core/core.c").read_text(encoding="utf-8")
+    runtime_sdk = Path("virtuals/runtime_sdk.c").read_text(encoding="utf-8")
+    introspection = Path("virtuals/introspection/runtime/inspct.c").read_text(encoding="utf-8")
     activity = Path("virtuals/introspection/runtime/activity.c").read_text(encoding="utf-8")
+    counter = Path("virtuals/function_counter/runtime/function_counter.c").read_text(encoding="utf-8")
 
     assert 'utils_get_arg("introspection"' not in source
     assert 'utils_get_arg("introspection_schema"' not in source
     assert 'utils_get_arg("introspection_activity_log"' not in activity
-    assert 'core_get_run_artifact_path("introspection/schema.txt"' in source
+    assert "introspection/schema.txt" not in source
+    assert "virtual_initialize_plugins" in runtime_sdk
+    assert 'VIRTUAL_PLUGIN("introspection"' in introspection
+    assert 'VIRTUAL_PLUGIN("function_counter"' in counter
+    assert "virtual_artifact_path" in activity
+    assert "core_get_run_artifact_path" not in counter
+    assert "virtual_register(" not in counter
+
+
+def test_runtime_sdk_keeps_guest_state_and_instrumentation_operations_public():
+    header = Path("include/fastdyn_runtime.h").read_text(encoding="utf-8")
+    implementation = Path("virtuals/runtime_sdk.c").read_text(encoding="utf-8")
+
+    for operation in (
+        "virtual_read_memory",
+        "virtual_write_memory",
+        "virtual_read_register",
+        "virtual_write_register",
+        "virtual_read_register_bytes",
+        "virtual_write_register_bytes",
+        "virtual_pc",
+        "virtual_sp",
+        "virtual_icount",
+        "virtual_guest_time_ns",
+        "virtual_raise_irq",
+        "virtual_register_irq_hook",
+        "virtual_register_tb_translation_hook",
+        "virtual_register_rule",
+        "virtual_register_update",
+        "virtual_register_gated_modifier",
+        "virtual_log",
+    ):
+        assert operation in header
+        assert operation in implementation
+
+    for header in (
+        "include/fastdyn/arch/arm32.h",
+        "include/fastdyn/arch/arm_v7m.h",
+        "include/fastdyn/arch/aarch64.h",
+        "include/fastdyn/arch/riscv64.h",
+        "include/fastdyn/arch/x86_64.h",
+    ):
+        assert Path(header).is_file()
+
+    assert "VIRTUAL_FIRST_ARG" in Path("include/fastdyn/arch/arm32.h").read_text()
+    assert "VIRTUAL_FIRST_ARG VIRTUAL_AARCH64_X0" in Path(
+        "include/fastdyn/arch/aarch64.h"
+    ).read_text()
+    assert "VIRTUAL_FIRST_ARG VIRTUAL_RISCV64_A0" in Path(
+        "include/fastdyn/arch/riscv64.h"
+    ).read_text()
+    assert "VIRTUAL_FIRST_ARG VIRTUAL_X86_64_RDI" in Path(
+        "include/fastdyn/arch/x86_64.h"
+    ).read_text()
 
 
 def test_qemu_serialization_uses_the_shared_virtual_pipeline(tmp_path):
