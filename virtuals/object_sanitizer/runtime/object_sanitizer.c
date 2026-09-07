@@ -256,11 +256,21 @@ static void object_san_alloc_return(unsigned int cpu, void *userdata) {
         fflush(lifecycle);
     }
     set_register_tag(cpu, 0, object->tag);
-    /* Core installs ordinary virtual callbacks after translation hooks.  If
-       the caller's first post-return instruction was already prepared, make
-       its captured source tag agree with the just-created return value. */
-    if (pending[cpu_slot(cpu)].plan && pending[cpu_slot(cpu)].plan->source == 0) {
-        pending[cpu_slot(cpu)].value_tag = object->tag;
+    /* The return virtual runs after the instruction-preparation callbacks
+       for the first caller instruction, but before that instruction executes.
+       Reconcile its captured shadow inputs with the allocator result.  A
+       store needs its deferred value shadow fixed; a register operation such
+       as ``mov r3, r0`` also needs its prepared destination fixed.  Without
+       the latter, provenance is lost whenever allocation is wrapped by a
+       helper function -- a common allocation-site pattern. */
+    if (pending[cpu_slot(cpu)].plan) {
+        PendingInstruction *state = &pending[cpu_slot(cpu)];
+        const ObjectSanPlan *next = state->plan;
+        if (next->source == 0) state->value_tag = object->tag;
+        if (next->base == 0) state->base_tag = object->tag;
+        if (next->kind == PLAN_PROPAGATE && (next->source == 0 || next->base == 0)) {
+            set_register_tag(cpu, next->dest, state->value_tag | state->base_tag);
+        }
     }
     virtual_log(runtime, VIRTUAL_LOG_DEBUG, "ObjectSan allocated %s at 0x%" PRIx64 " (+%" PRIu64 ")",
                 object->name, object->base, object->size);

@@ -4,9 +4,11 @@
 #include <string.h>
 
 #include <fastdyn_runtime.h>
+#include <variable_watch.h>
 
 #define VARIABLE_WATCH_MAX_CANDIDATES 250000
 #define VARIABLE_WATCH_VALUE_MAX 256
+#define VARIABLE_WATCH_MAX_CALLBACKS 32
 
 typedef enum { WATCH_READ, WATCH_WRITE, WATCH_READ_WRITE } WatchAccess;
 
@@ -30,6 +32,45 @@ static size_t previous_size;
 static int previous_valid;
 static FILE *events;
 static const VirtualContext *runtime;
+static struct {
+    VariableWatchCallback callback;
+    void *userdata;
+} callbacks[VARIABLE_WATCH_MAX_CALLBACKS];
+static size_t callback_count;
+
+int variable_watch_register_callback(VariableWatchCallback callback, void *userdata) {
+    if (!callback || callback_count >= VARIABLE_WATCH_MAX_CALLBACKS) return -1;
+    callbacks[callback_count].callback = callback;
+    callbacks[callback_count].userdata = userdata;
+    callback_count++;
+    return 0;
+}
+
+static void dispatch_event(const WatchCandidate *candidate, int is_write,
+                           uint64_t address, uint64_t width,
+                           const unsigned char *old_value, size_t old_size,
+                           const unsigned char *new_value, size_t new_size,
+                           int changed) {
+    VariableWatchEvent event = {
+        .name = target.name,
+        .type = target.type,
+        .parent = target.parent,
+        .function = candidate->function[0] ? candidate->function : "<unknown>",
+        .pc = candidate->pc,
+        .address = address,
+        .access_size = width,
+        .access = is_write ? VARIABLE_WATCH_WRITE : VARIABLE_WATCH_READ,
+        .old_value = old_value,
+        .old_value_size = old_size,
+        .new_value = new_value,
+        .new_value_size = new_size,
+        .changed = changed,
+    };
+    size_t index;
+    for (index = 0; index < callback_count; ++index) {
+        callbacks[index].callback(&event, callbacks[index].userdata);
+    }
+}
 
 static WatchCandidate *find_candidate(uint64_t pc) {
     size_t low = 0, high = candidate_count;
@@ -71,12 +112,16 @@ static void variable_watch_access(unsigned int cpu, qemu_plugin_meminfo_t info,
     size_t value_size = 0;
     char old_value[VARIABLE_WATCH_VALUE_MAX * 2 + 1] = "";
     char new_value[VARIABLE_WATCH_VALUE_MAX * 2 + 1] = "";
+    int changed;
     (void)cpu;
     if ((!is_write && target.access == WATCH_WRITE) || (is_write && target.access == WATCH_READ)
         || !overlaps(address, width) || !events) return;
     if (watched_bytes(value, &value_size) != 0) return;
-    if (is_write && target.changes_only && previous_valid && previous_size == value_size
-        && !memcmp(previous, value, value_size)) return;
+    changed = !previous_valid || previous_size != value_size || memcmp(previous, value, value_size) != 0;
+    dispatch_event(candidate, is_write, address, width,
+                   previous_valid ? previous : NULL, previous_valid ? previous_size : 0,
+                   value, value_size, changed);
+    if (is_write && target.changes_only && !changed) return;
     if (previous_valid) hex_value(previous, previous_size, old_value, sizeof(old_value));
     hex_value(value, value_size, new_value, sizeof(new_value));
     fprintf(events, "%s\t0x%" PRIx64 "\t%s\t%s\t0x%" PRIx64 "\t%" PRIu64 "\t%s\t%s\t%s\n",

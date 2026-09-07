@@ -32,15 +32,17 @@ def _unwrap(die):
     return die
 
 
-def _type_size(die) -> int:
+def _type_size(die, pointer_size: int = 0) -> int:
     die = _unwrap(die)
     if not die:
         return 0
     size = die.attributes.get("DW_AT_byte_size")
     if size:
         return int(size.value)
+    if die.tag == "DW_TAG_pointer_type":
+        return pointer_size
     if die.tag == "DW_TAG_array_type":
-        element = _type_size(die.get_DIE_from_attribute("DW_AT_type"))
+        element = _type_size(die.get_DIE_from_attribute("DW_AT_type"), pointer_size)
         count = 1
         for child in die.iter_children():
             if child.tag != "DW_TAG_subrange_type":
@@ -51,7 +53,7 @@ def _type_size(die) -> int:
             count *= int(bound.value) if "DW_AT_count" in child.attributes else int(bound.value) + 1
         return element * count
     target = die.get_DIE_from_attribute("DW_AT_type")
-    return _type_size(target) if target else 0
+    return _type_size(target, pointer_size) if target else 0
 
 
 def _type_name(die) -> str:
@@ -118,7 +120,7 @@ def _resolve_variable(ctx: RunContext, expression: str) -> WatchTarget:
                         raise VirtualPreparationError(f"could not resolve DWARF offset for {expression!r}")
                     address += offset
                     typed = member.get_DIE_from_attribute("DW_AT_type")
-                size = _type_size(typed)
+                size = _type_size(typed, width)
                 if size:
                     return WatchTarget(expression, address, size, _type_name(typed), parent)
         if not fields:
@@ -180,7 +182,7 @@ class VariableWatchPreprocessor:
             if not size:
                 raise VirtualPreparationError("variable_watch.size must be positive")
             start = _integer(address, "address")
-            target = WatchTarget(f"0x{start:x}", start, size, "raw", "")
+            target = WatchTarget(f"0x{start:x}", start, size, "raw", "<raw>")
         access = settings.get("access", "read_write")
         if not isinstance(access, str) or access not in {"read", "write", "read_write"}:
             raise VirtualPreparationError("variable_watch.access must be read, write, or read_write")

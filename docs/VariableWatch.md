@@ -69,6 +69,36 @@ access direction, actual address/width, old/new bytes, and DWARF type. Values
 are currently represented as target-byte-order hexadecimal to keep the event
 format correct for scalar, aggregate, and partial accesses.
 
+## Runtime callbacks for plugin developers
+
+Compiled-in plugins can subscribe to structured watch events instead of
+polling or parsing `events.tsv`:
+
+```c
+#include <variable_watch.h>
+
+static void observe(const VariableWatchEvent *event, void *userdata)
+{
+    if (event->access == VARIABLE_WATCH_WRITE && event->changed) {
+        /* Inspect event->name, PC, function, values, or guest state here. */
+    }
+    (void)userdata;
+}
+
+static int my_plugin_init(const VirtualContext *ctx)
+{
+    (void)ctx;
+    return variable_watch_register_callback(observe, NULL);
+}
+```
+
+`variable_watch_register_callback()` is intended for a compiled plugin's
+initializer, before QEMU executes. It returns `-1` for an invalid callback or
+when its bounded registry is full. A callback receives every matching filtered
+read/write access, including an unchanged write when `changes_only = true`
+would suppress the TSV row. The event's value-buffer pointers are transient:
+copy them during the callback if they must outlive it.
+
 ## Runnable fixtures
 
 ```bash
