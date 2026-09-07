@@ -247,6 +247,37 @@ def test_object_sanitizer_normalizes_a_selected_custom_allocation_site(tmp_path)
     assert "Reset_Handler" in sites
 
 
+def test_variable_watch_resolves_a_dwarf_structure_field(tmp_path):
+    cpu = _Cpu(plugin_config={"variable_watch": {
+        "enabled": True,
+        "variable": "motor_state.temperature",
+        "access": "write",
+        "changes_only": True,
+    }})
+    cpu.binary = str(Path("tests/binaries/variable_watch/variable_watch.elf").resolve())
+    machine = _Machine(cpu)
+
+    prepare_run_preprocessors(machine, tmp_path)
+
+    watch = (tmp_path / "run-artifacts" / "variable_watch" / "watch.tsv").read_text()
+    assert "motor_state.temperature\t0x20000008\t4" in watch
+    candidates = (tmp_path / "run-artifacts" / "variable_watch" / "candidate_accesses.tsv").read_text()
+    assert "set_temperature" in candidates
+
+
+def test_variable_watch_accepts_a_raw_address_without_dwarf_resolution(tmp_path):
+    cpu = _Cpu(plugin_config={"variable_watch": {
+        "enabled": True, "address": "0x20000008", "size": 4, "access": "read_write",
+    }})
+    cpu.binary = str(Path("tests/binaries/variable_watch/variable_watch.elf").resolve())
+    machine = _Machine(cpu)
+
+    prepare_run_preprocessors(machine, tmp_path)
+
+    watch = (tmp_path / "run-artifacts" / "variable_watch" / "watch.tsv").read_text()
+    assert "0x20000008\t4\traw" in watch
+
+
 def test_toml_plugin_settings_are_passed_without_frontend_feature_dispatch(tmp_path):
     config = tmp_path / "plugin-settings.toml"
     config.write_text(

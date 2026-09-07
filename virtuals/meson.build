@@ -5,6 +5,7 @@ subdir('introspection')
 subdir('function_counter')
 subdir('function_tracer')
 subdir('object_sanitizer')
+subdir('variable_watch')
 
 if get_option('enable_phy')
     subdir('physics')

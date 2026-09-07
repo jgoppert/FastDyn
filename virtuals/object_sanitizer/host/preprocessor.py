@@ -20,8 +20,10 @@ from fastdyn.virtual_preprocessing import (
 )
 try:  # Keep the module unit-testable without FastDyn's dynamic plugin loader.
     from _fastdyn_virtual_utils.rtos_models import identify_rtos
+    from _fastdyn_virtual_utils.object_access_analysis import ObjectAccessAnalysis
 except ModuleNotFoundError:
     from virtuals.utils.rtos_models import identify_rtos
+    from virtuals.utils.object_access_analysis import ObjectAccessAnalysis
 from .allocators import AllocationAPI, select_models
 
 
@@ -206,7 +208,8 @@ def _read_u32(segments: list[tuple[int, bytes]], address: int) -> int | None:
     return None
 
 
-def _instruction_plan(ctx: RunContext, static_bases: dict[int, int]) -> list[tuple[int, str, int, int, int]]:
+def _instruction_plan(ctx: RunContext, static_bases: dict[int, int],
+                      candidates: frozenset[int]) -> list[tuple[int, str, int, int, int]]:
     """Produce conservative ARM Thumb register/memory propagation semantics.
 
     Unknown arithmetic is deliberately over-tainted with all its input tags.
@@ -238,10 +241,10 @@ def _instruction_plan(ctx: RunContext, static_bases: dict[int, int]) -> list[tup
                 mem = next((operand.mem for operand in operands if operand.type == ARM_OP_MEM), None)
                 base = _arm_register(insn, mem.base) if mem and mem.base else -1
                 mnemonic = insn.mnemonic.lower()
-                if mnemonic.startswith('str') and mem:
+                if mnemonic.startswith('str') and mem and address in candidates:
                     source = _arm_register(insn, operands[0].reg) if operands and operands[0].type == ARM_OP_REG else -1
                     result[address] = ('store', -1, source, base)
-                elif mnemonic.startswith('ldr') and mem:
+                elif mnemonic.startswith('ldr') and mem and address in candidates:
                     literal = _read_u32(segments, ((address + 4) & ~3) + mem.disp) if base == 15 else None
                     seed = static_bases.get(literal)
                     result[address] = ('seed', dest, seed, base) if seed is not None and dest >= 0 else ('load', dest, -1, base)
@@ -360,7 +363,10 @@ class ObjectSanRunPreprocessor:
         object_events.write_text("event\tobject_id\tname\tbase\tsize\tstate\n", encoding="utf-8")
         allocators.write_text("name\tallocate\tsize_arg\tfree\tpointer_arg\treturn_pointer_arg\tallocator_id\theap_id\n" + "".join(f"{api.name}\t{api.allocate}\t{api.size_argument}\t{api.free or ''}\t{api.free_pointer_argument}\t{api.return_pointer_argument if api.return_pointer_argument is not None else -1}\t{api.allocator_id}\t{api.heap_id}\n" for api in apis), encoding="utf-8")
         sites_path.write_text("site_id\tapi\tcall_pc\treturn_pc\tsize_arg\treturn_pointer_arg\tallocator_id\theap_id\towner\tsource\n" + "".join(f"{site.id}\t{site.api.name}\t0x{site.call_pc:x}\t0x{site.return_pc:x}\t{site.api.size_argument}\t{site.api.return_pointer_argument if site.api.return_pointer_argument is not None else -1}\t{site.api.allocator_id}\t{site.api.heap_id}\t{site.owner}\t{site.source}\n" for site in sites), encoding="utf-8")
-        semantic_plan = _instruction_plan(ctx, {address: index for index, (_name, address, _size, _source) in enumerate(static_objects)})
+        candidates = frozenset(item.pc for item in ObjectAccessAnalysis(ctx.binary, ctx.architecture).candidate_accesses())
+        semantic_plan = _instruction_plan(
+            ctx, {address: index for index, (_name, address, _size, _source) in enumerate(static_objects)}, candidates
+        )
         plan.write_text("pc\tkind\tdest\tsource\tbase\n" + "".join(f"0x{pc:x}\t{kind}\t{dest}\t{source}\t{base}\n" for pc, kind, dest, source, base in semantic_plan), encoding="utf-8")
         virtuals = [item for site in sites for item in (
             VirtualInstruction(at=site.call_pc, instruction="object_sanitizer_alloc_call", args=[str(site.id)]),

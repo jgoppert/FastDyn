@@ -1,0 +1,35 @@
+[Machine]
+platform = "generic-cortexm"
+qemu_path = "../qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-variable-watch-raw.qmp"
+log_options = "none"
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "1M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-variable-watch-raw.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "lm3s6965evb"
+cpu = "cortex-m3"
+binary = "tests/binaries/variable_watch/variable_watch.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.variable_watch]
+enabled = true
+address = "0x20000008"
+size = 4
+access = "read_write"
