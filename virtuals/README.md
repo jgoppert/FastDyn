@@ -161,5 +161,7 @@ than `printf()` or a private log file.
 
 - [`function_counter/`](function_counter/) is a compact module that registers
   a callback, reads a manifest, and writes final counts on exit.
+- [`function_tracer/`](function_tracer/) extends that pattern with a
+  DWARF-derived entry-argument manifest and structured trace output.
 - [`introspection/`](introspection/) is a larger run-wide module that loads a
   host-generated schema and emits structured activity events.

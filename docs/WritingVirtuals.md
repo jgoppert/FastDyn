@@ -22,6 +22,8 @@ For a compact, runnable run-preprocessor implementation, see the
 [function-counter plugin](FunctionCounterPlugin.md). It discovers ELF
 functions, emits one entry virtual per function, and writes aggregate counts
 without any feature-specific frontend or QEMU command-line handling.
+The [function-tracer plugin](FunctionTracerPlugin.md) builds on that example:
+its preprocessor turns DWARF formal parameters into a runtime argument schema.
 
 ## Choose the smallest extension
 

@@ -169,6 +169,36 @@ def test_function_counter_plugin_generates_one_entry_virtual_per_elf_function(tm
     assert "z_arm_pendsv" in manifest.read_text(encoding="utf-8")
 
 
+def test_function_tracer_generates_dwarf_argument_schema_for_structures(tmp_path):
+    cpu = _Cpu(
+        plugin_config={
+            "function_tracer": {
+                "enabled": True,
+                "include": ["z_impl_k_sleep_ticks"],
+                "max_functions": 8,
+                "max_events": 10,
+            }
+        }
+    )
+    cpu.binary = str(Path("tests/binaries/rtos/zephyr.elf").resolve())
+    machine = _Machine(cpu)
+
+    prepare_run_preprocessors(machine, tmp_path)
+
+    generated = machine.generated_virtual_rules[id(cpu)]
+    rules = [rule.virtual for rule in generated if rule.origin == "function_tracer"]
+    assert "function_tracer" in VIRTUAL_DEFINITIONS
+    assert len(rules) == 1
+    assert rules[0].instruction == "function_tracer"
+    assert rules[0].args == ["z_impl_k_sleep_ticks"]
+    arguments = (
+        tmp_path / "run-artifacts" / "function_tracer" / "arguments.tsv"
+    ).read_text(encoding="utf-8")
+    assert "timeout\t" in arguments
+    assert "\tstruct\t" in arguments
+    assert "ticks|0|int|" in arguments
+
+
 def test_toml_plugin_settings_are_passed_without_frontend_feature_dispatch(tmp_path):
     config = tmp_path / "plugin-settings.toml"
     config.write_text(
@@ -226,6 +256,8 @@ def test_native_plugins_use_the_runtime_sdk_not_plugin_arguments_or_core_dispatc
     assert "virtual_artifact_path" in activity
     assert "core_get_run_artifact_path" not in counter
     assert "virtual_register(" not in counter
+    assert "core_read_ram" not in runtime_sdk
+    assert "core_write_ram" not in runtime_sdk
 
 
 def test_runtime_sdk_keeps_guest_state_and_instrumentation_operations_public():

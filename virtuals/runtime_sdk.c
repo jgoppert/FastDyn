@@ -1,6 +1,7 @@
 /* Generic runtime-plugin dispatcher and public SDK implementation. */
 #include <fastdyn_runtime.h>
 
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -145,14 +146,20 @@ void virtual_write_register(const VirtualContext *ctx, int reg,
 int virtual_read_memory(const VirtualContext *ctx,
                                 uintptr_t address, size_t size, void *buffer) {
     (void)ctx;
-    return core_read_ram(address, size, buffer);
+    if (!buffer || size > INT_MAX) {
+        return -1;
+    }
+    return qemu_plugin_read_memory(address, (uint8_t *)buffer, (int)size);
 }
 
 int virtual_write_memory(const VirtualContext *ctx,
                                  uintptr_t address, size_t size,
                                  const void *buffer) {
     (void)ctx;
-    return core_write_ram(address, size, buffer);
+    if (!buffer || size > INT_MAX) {
+        return -1;
+    }
+    return qemu_plugin_write_memory(address, (uint8_t *)buffer, (int)size);
 }
 
 void virtual_raise_irq(const VirtualContext *ctx, int irq,

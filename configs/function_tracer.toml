@@ -1,0 +1,39 @@
+# Educational DWARF-assisted function-call tracer. It emits a bounded trace of
+# selected function entries and their ABI arguments to run-artifacts.
+[Machine]
+platform = "generic-cortexm"
+qemu_path = "../qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-function-tracer.qmp"
+log_options = "none"
+reset_memory_files = true
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "8M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-function-tracer.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "lm3s6965evb"
+cpu = "cortex-m3"
+binary = "tests/binaries/rtos/zephyr.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.function_tracer]
+enabled = true
+# Trace a deliberately small group: entry traces are high-volume by design.
+include = ["z_thread_entry", "thread_a_entry_point", "thread_b_entry_point", "z_impl_k_sleep_ticks"]
+max_functions = 32
+max_events = 10000
