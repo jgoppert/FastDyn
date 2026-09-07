@@ -271,6 +271,28 @@ plugin code. It may use the documented generic FastDyn APIs, such as symbol
 resolution and artifact allocation, but it does not belong under
 `src/fastdyn`.
 
+### Project-wide ownership convention
+
+This boundary applies to every virtual and plugin:
+
+```text
+one feature only        -> virtuals/<feature>/
+shared plugin helpers   -> virtuals/utils/
+generic FastDyn support -> src/fastdyn/ (core-maintainer-owned)
+```
+
+Put a helper beside its feature by default. Move it to `virtuals/utils/` only
+when two or more independently useful plugins need it. `virtuals/utils/` is
+the shared host-side plugin utility package; it must not become a place for
+feature-specific dispatch or frontend policy.
+
+Do not put plugin- or RTOS-specific behavior, TOML interpretation, runtime
+arguments, or feature registries in `src/fastdyn/`. If a plugin genuinely
+needs a new generic frontend capability, SDK API, lifecycle hook, or loader
+behavior, stop and request that addition from the FastDyn core maintainers.
+Core maintainers own the generic contract; plugin authors own implementations
+against that contract.
+
 ## Testing RTOS introspection without RTOS submodules
 
 Do not add whole RTOS source trees as submodules merely to test an
