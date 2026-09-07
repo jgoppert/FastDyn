@@ -2,6 +2,10 @@ from fastdyn.binary.symmap import SymbolResolver
 from fastdyn.binary.symmap.core import SymbolInfo
 from fastdyn.binary.symmap.providers.dwarf import DwarfProvider
 from fastdyn import fastdyn_log as fastdyn_log_conf
+try:  # Direct imports in host-side tests do not go through plugin discovery.
+    from _fastdyn_virtual_utils.rtos_models import RTOS_SIGNATURES, identify_rtos as _identify_rtos
+except ModuleNotFoundError:
+    from virtuals.utils.rtos_models import RTOS_SIGNATURES, identify_rtos as _identify_rtos
 from .introspector_base import RTOSIntrospector
 from fastdyn.machine import VirtualInstruction
 from dataclasses import dataclass, field
@@ -10,35 +14,6 @@ import importlib
 from pathlib import Path
 
 fastdyn_log = fastdyn_log_conf.getFastdynLogger()
-
-RTOS_SIGNATURES = {
-    "FreeRTOS": {"pxCurrentTCB", "vTaskSwitchContext"},
-    "Zephyr": (
-        # z_swap is inline in current Zephyr releases; z_sched_yield is a
-        # stable out-of-line scheduler entry point on those builds.
-        {"_kernel", "z_swap"},
-        {"_kernel", "z_sched_yield"},
-    ),
-    # ThreadX public APIs are normally macro aliases for underscore-prefixed
-    # implementation symbols in a linked firmware.
-    "ThreadX": (
-        {"_tx_thread_current_ptr", "_tx_thread_create"},
-        {"_tx_thread_current_ptr", "tx_thread_create"},
-    ),
-    # rt_current_thread is a macro in current RT-Thread releases; the
-    # exported rt_thread_self() function is the stable linked equivalent.
-    "RT-Thread": (
-        {"rt_thread_self", "rt_thread_create"},
-        {"rt_current_thread", "rt_thread_create"},
-    ),
-    "NuttX": {"g_readytorun", "nx_start"},
-    # chSchReadyI is an inline scheduler helper in current ChibiOS builds;
-    # the system state plus the ARM port switch routine are linked symbols.
-    "ChibiOS": (
-        {"ch_system", "__port_switch"},
-        {"chSchReadyI"},
-    ),
-}
 
 
 @dataclass(frozen=True)
@@ -52,17 +27,10 @@ def identify_rtos(symbols):
     """
     Pass in a list or set of symbol names from your SymbolInfo dictionary.
     """
-    symbol_set = set(symbols.keys())
-
-    for rtos, signature in RTOS_SIGNATURES.items():
-        # Using issubset ensures we match even if LTO stripped some other symbols,
-        # as long as our core signatures survived.
-        signatures = signature if isinstance(signature, tuple) else (signature,)
-        if any(sig_symbols.issubset(symbol_set) for sig_symbols in signatures):
-            fastdyn_log.info("Detected RTOS:" + rtos)
-            return rtos
-    fastdyn_log.info("Likely Unknown/Custom Baremetal")
-    return "Unknown/Custom Baremetal"
+    rtos = _identify_rtos(symbols)
+    fastdyn_log.info("Detected RTOS:" + rtos if rtos != "Unknown/Custom Baremetal"
+                     else "Likely Unknown/Custom Baremetal")
+    return rtos
 
 
 def _add_elf_symbol_table_symbols(binary, symbols):

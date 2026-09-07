@@ -199,6 +199,54 @@ def test_function_tracer_generates_dwarf_argument_schema_for_structures(tmp_path
     assert "ticks|0|int|" in arguments
 
 
+def test_object_sanitizer_resolves_a_static_dwarf_object(tmp_path):
+    cpu = _Cpu(plugin_config={"object_sanitizer": {"enabled": True, "object": "thread_a_sem"}})
+    cpu.binary = str(Path("tests/binaries/rtos/zephyr.elf").resolve())
+    machine = _Machine(cpu)
+
+    prepare_run_preprocessors(machine, tmp_path)
+
+    manifest = (tmp_path / "run-artifacts" / "object_sanitizer" / "objects.tsv").read_text()
+    assert "thread_a_sem" in manifest
+    assert "0x2000003c" in manifest
+    assert "\t16\tstatic\tLIVE\t" in manifest
+
+
+def test_object_sanitizer_resolves_static_objects_by_dwarf_type(tmp_path):
+    cpu = _Cpu(plugin_config={"object_sanitizer": {"enabled": True, "type": "struct k_sem"}})
+    cpu.binary = str(Path("tests/binaries/rtos/zephyr.elf").resolve())
+    machine = _Machine(cpu)
+
+    prepare_run_preprocessors(machine, tmp_path)
+
+    manifest = (tmp_path / "run-artifacts" / "object_sanitizer" / "objects.tsv").read_text()
+    assert "thread_a_sem" in manifest
+
+
+def test_object_sanitizer_normalizes_a_selected_custom_allocation_site(tmp_path):
+    cpu = _Cpu(plugin_config={"object_sanitizer": {
+        "enabled": True,
+        "function": "Reset_Handler",
+        "allocation": 1,
+        "allocators": [{
+            "name": "fixture_pool", "allocate": "pool_alloc", "size_arg": 0,
+            "free": "pool_free", "pointer_arg": 0,
+        }],
+    }})
+    cpu.binary = str(Path("tests/binaries/object_sanitizer/dynamic_oob.elf").resolve())
+    machine = _Machine(cpu)
+
+    prepare_run_preprocessors(machine, tmp_path)
+
+    generated = [rule.virtual for rule in machine.generated_virtual_rules[id(cpu)]]
+    assert [item.instruction for item in generated].count("object_sanitizer_alloc_call") == 1
+    assert [item.instruction for item in generated].count("object_sanitizer_alloc_return") == 1
+    assert [item.instruction for item in generated].count("object_sanitizer_free") == 1
+    sites = (tmp_path / "run-artifacts" / "object_sanitizer" / "allocation_sites.tsv").read_text()
+    assert "fixture_pool" in sites
+    assert "Reset_Handler" in sites
+
+
 def test_toml_plugin_settings_are_passed_without_frontend_feature_dispatch(tmp_path):
     config = tmp_path / "plugin-settings.toml"
     config.write_text(

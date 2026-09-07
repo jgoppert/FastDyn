@@ -1,0 +1,43 @@
+[Machine]
+platform = "generic-cortexm"
+qemu_path = "../qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-objectsan-dynamic.qmp"
+log_options = "none"
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "1M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-objectsan-dynamic.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "lm3s6965evb"
+cpu = "cortex-m3"
+binary = "tests/binaries/object_sanitizer/dynamic_oob.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x0"
+
+[CPU.cpu0.plugins.object_sanitizer]
+enabled = true
+function = "Reset_Handler"
+allocation = 1
+
+[[CPU.cpu0.plugins.object_sanitizer.allocators]]
+name = "fixture_pool"
+allocate = "pool_alloc"
+size_arg = 0
+free = "pool_free"
+pointer_arg = 0
+allocator_id = "fixture"
+heap_id = "fixture_pool"

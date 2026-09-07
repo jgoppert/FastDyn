@@ -4,6 +4,7 @@ srcs += files('runtime_sdk.c')
 subdir('introspection')
 subdir('function_counter')
 subdir('function_tracer')
+subdir('object_sanitizer')
 
 if get_option('enable_phy')
     subdir('physics')

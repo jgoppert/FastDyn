@@ -175,6 +175,24 @@ def _load_run_plugins() -> None:
     virtuals_root = Path(__file__).resolve().parents[2] / "virtuals"
     if not virtuals_root.is_dir():
         return
+    # Utilities shared by independently discovered plugins are exposed as a
+    # separate private package. The frontend knows only this generic package
+    # location; it has no knowledge of the utilities or plugins within it.
+    utility_dir = virtuals_root / "utils"
+    utility_package = "_fastdyn_virtual_utils"
+    if utility_dir.is_dir() and utility_package not in sys.modules:
+        utility_init = utility_dir / "__init__.py"
+        utility_spec = importlib.util.spec_from_file_location(
+            utility_package,
+            utility_init if utility_init.is_file() else None,
+            submodule_search_locations=[str(utility_dir)],
+        )
+        if utility_spec is None:
+            raise ImportError(f"cannot create FastDyn plugin utility package: {utility_dir}")
+        utility_module = importlib.util.module_from_spec(utility_spec)
+        sys.modules[utility_package] = utility_module
+        if utility_spec.loader is not None:
+            utility_spec.loader.exec_module(utility_module)
     for source in sorted(virtuals_root.glob("*/host/preprocessor.py")):
         package_name = f"_fastdyn_virtual_plugin_{source.parent.parent.name}"
         module_name = f"{package_name}.host.preprocessor"
