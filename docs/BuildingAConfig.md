@@ -12,6 +12,23 @@ It is deliberately almost empty. Replace `binary` with your ELF and update
 the QEMU path if it is not at the repository default. The remaining choices
 can be made through `fastdyn help`.
 
+## Start from an ELF when possible
+
+For an ELF firmware, generate a better starting point first:
+
+```bash
+./fastdyn-env/bin/python tools/elf2config/elf_to_config.py build/my_firmware.elf \
+  --output configs/my_firmware.toml
+```
+
+The utility recovers the ELF architecture, word size, entry point, loadable
+writable memory, Cortex-M vector table, ARM ABI CPU metadata, and recognizable
+RTOS/MCU hints. It deliberately does not invent a board or a complete RAM map;
+for Cortex-M it uses the `classic` model for the conventional MMIO window as a
+reviewable default. Review the comments in the output and continue with the
+steps below; [`tools/elf2config/README.md`](../tools/elf2config/README.md)
+documents its limits and overwrite behavior.
+
 ## 1. Choose the CPU target
 
 Run:
@@ -194,4 +211,7 @@ fastdyn run -c my_firmware.toml -o fastdyn_work
 If the configuration fails, start by checking the copied CPU target, memory
 map, ELF path, and initial vector/entry address. The generated work directory
 contains the resolved `virtuals.txt`, `modifiers.txt`, logs, and any selected
-plugin artifacts.
+plugin artifacts. [RunningFastDyn.md](RunningFastDyn.md) contains a
+slide-ready explanation of this workflow, primary options, and the artifacts
+to inspect afterwards. The same guidance is available in the terminal through
+`fastdyn help run`.

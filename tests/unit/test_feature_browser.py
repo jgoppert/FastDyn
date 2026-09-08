@@ -67,10 +67,12 @@ def test_essential_run_configuration_browsers_expose_toml_fragments():
     memory = {entry.name: entry for entry in feature_browser.memory_entries()}
     firmware = {entry.name: entry for entry in feature_browser.firmware_entries()}
     machine = {entry.name: entry for entry in feature_browser.machine_entries()}
+    run = {entry.name: entry for entry in feature_browser.run_entries()}
 
     assert "[Memory.main]" in memory["primary file-backed RAM"].toml
     assert 'binary = "build/firmware.elf"' in firmware["ELF firmware"].toml
     assert 'qemu_path = "qemu/build/qemu-system-arm"' in machine["headless QEMU"].toml
+    assert "fastdyn run -c configs/target.toml" in run["run a configuration"].toml
 
 
 def test_virtuals_command_prints_catalog_and_selected_plugin(monkeypatch):
@@ -99,6 +101,7 @@ def test_help_group_exposes_discovery_subcommands():
     models = CliRunner().invoke(main.cli, ["help", "device-models", "--no-browse"])
     memory = CliRunner().invoke(main.cli, ["help", "memory", "--no-browse"])
     firmware = CliRunner().invoke(main.cli, ["help", "firmware", "--no-browse"])
+    run = CliRunner().invoke(main.cli, ["help", "run", "--no-browse"])
     platform_menu = platform_browser.build_platform_browser([
         ("Vendor", "Device", "/catalog/Vendor/Device.svd"),
     ])
@@ -111,6 +114,7 @@ def test_help_group_exposes_discovery_subcommands():
     assert "machine" in result.output
     assert "memory" in result.output
     assert "firmware" in result.output
+    assert "run" in result.output
     assert modifiers.exit_code == 0
     assert "register-indirect assignment" in modifiers.output
     assert models.exit_code == 0
@@ -119,5 +123,7 @@ def test_help_group_exposes_discovery_subcommands():
     assert "primary file-backed RAM" in memory.output
     assert firmware.exit_code == 0
     assert "ELF firmware" in firmware.output
+    assert run.exit_code == 0
+    assert "fastdyn run -c configs/target.toml" in run.output
     platform_docs = platform_menu.advance(platform_menu.choices[-1][1])
     assert platform_docs.advance(platform_docs.choices[0][1]).path == "docs/PlatformBrowser.md"

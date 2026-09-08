@@ -15,11 +15,13 @@ def build_help_browser(svd_path: str) -> Menu:
     machine = feature_browser.build_machine_browser()
     memory = feature_browser.build_memory_browser()
     firmware = feature_browser.build_firmware_browser()
+    run = feature_browser.build_run_browser()
     choices = (
         ("Platforms and CPU targets", platforms),
         ("Machine and QEMU settings", machine),
         ("Memory", memory),
         ("Firmware binary and CPU settings", firmware),
+        ("Run FastDyn", run),
         ("Peripheral device models", device_models),
         ("Virtual instructions and run-wide plugins", features),
         ("Instruction modifiers", modifiers),

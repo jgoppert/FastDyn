@@ -401,6 +401,29 @@ def firmware(browse):
     click.echo('\nBrowse interactively with: fastdyn help firmware --browse')
 
 
+@help_command.command(
+    'run',
+    help='Show the FastDyn run command, its primary flags, and the resulting work directory.',
+)
+@click.option('--browse/--no-browse', default=None,
+              help='Force or disable the inline run-workflow browser.')
+def run_help(browse):
+    """Make the required ``fastdyn run -c CONFIG`` workflow discoverable."""
+    from . import feature_browser
+    if browse is None:
+        browse = sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        selected = feature_browser.browse_run()
+        if selected:
+            _show_feature_selection(selected)
+        return
+    click.echo('Run FastDyn:')
+    for entry in feature_browser.run_entries():
+        click.echo(f'  {entry.name:<34} {entry.description}')
+        click.echo(f'    {entry.toml}')
+    click.echo('\nBrowse interactively with: fastdyn help run --browse')
+
+
 @cli.command('run',help= 'Runs the firmware on QEMU using the passed config file.')
 @click.option('-c','--config',required = True, type= click.Path(resolve_path=True,exists=True),
                         help='The Path to the config file.',

@@ -97,6 +97,19 @@ _FIRMWARE_SETTINGS = (
 )
 
 
+_RUN_GUIDE = (
+    FeatureEntry("Execution command", "run a configuration", "Launch QEMU using one FastDyn TOML configuration.",
+                 "fastdyn run -c configs/target.toml -o fastdyn_work",
+                 "docs/RunningFastDyn.md"),
+    FeatureEntry("Execution command", "preserve a previous work directory", "Keep prior artifacts rather than resetting the selected work directory.",
+                 "fastdyn run -c configs/target.toml -o fastdyn_work --persist-work-dir",
+                 "docs/RunningFastDyn.md"),
+    FeatureEntry("Execution command", "use an explicit SVD catalog", "Resolve a board platform against a specific CMSIS-SVD file or catalog.",
+                 "fastdyn run -c configs/target.toml -s third_party/common/cmsis-svd-data",
+                 "docs/RunningFastDyn.md"),
+)
+
+
 def _registered_entries(
     kind: str,
     definitions: dict[str, virtual_preprocessing.VirtualDefinition]
@@ -150,6 +163,10 @@ def memory_entries() -> tuple[FeatureEntry, ...]:
 
 def firmware_entries() -> tuple[FeatureEntry, ...]:
     return _FIRMWARE_SETTINGS
+
+
+def run_entries() -> tuple[FeatureEntry, ...]:
+    return _RUN_GUIDE
 
 
 def _entry_menu(title: str, entries: tuple[FeatureEntry, ...]) -> Menu:
@@ -264,4 +281,16 @@ def build_firmware_browser() -> Menu:
 
 def browse_firmware() -> FeatureEntry | DocumentationEntry | None:
     selected = browse_menu(build_firmware_browser())
+    return selected if isinstance(selected, (FeatureEntry, DocumentationEntry)) else None
+
+
+def build_run_browser() -> Menu:
+    return _settings_menu("Run FastDyn", _RUN_GUIDE, (
+        DocumentationEntry("docs/RunningFastDyn.md", "Run workflow, flags, and generated artifacts"),
+        DocumentationEntry("docs/BuildingAConfig.md", "Build a configuration before running it"),
+    ))
+
+
+def browse_run() -> FeatureEntry | DocumentationEntry | None:
+    selected = browse_menu(build_run_browser())
     return selected if isinstance(selected, (FeatureEntry, DocumentationEntry)) else None
