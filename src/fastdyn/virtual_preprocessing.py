@@ -30,6 +30,14 @@ class VirtualPreparationError(ValueError):
 
 
 @dataclass(frozen=True)
+class ConfigurationHelp:
+    """Public configuration-discovery metadata owned by a virtual or plugin."""
+    description: str
+    toml: str
+    documentation: str
+
+
+@dataclass(frozen=True)
 class VirtualContext:
     """Stable host-side context available to a virtual preprocessor."""
 
@@ -129,6 +137,7 @@ class VirtualDefinition:
     name: str
     prepare: VirtualPreprocessor | None = None
     requires: frozenset[str] = frozenset()
+    help: ConfigurationHelp | None = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +147,7 @@ class RunDefinition:
     name: str
     prepare: RunPreprocessor
     enabled: Callable[[RunContext], bool]
+    help: ConfigurationHelp | None = None
 
 
 @dataclass(frozen=True)
@@ -277,15 +287,38 @@ class PeriodicIrqPreprocessor(CortexMIrqPreprocessor):
 
 def _register_builtin_virtuals() -> None:
     core_virtuals = (
-        "printreg", "updatemem", "randstate", "pulseirq", "dumplog",
-        "dyninst", "timer_start", "start_budgeting", "dyninst_lib",
-        "debug_log", "benchmark_start", "benchmark_end", "bench_tick",
+        ("printreg", "Print one QEMU register.", '["0"]'),
+        ("updatemem", "Read or write guest memory.", '["0x20001000:w:4:0xde,0xad,0xbe,0xef"]'),
+        ("randstate", "Randomize selected register or memory state.", '["0,1,2"]'),
+        ("pulseirq", "Pulse an IRQ at a trigger PC.", '["42"]'),
+        ("dumplog", "Dump an internal logger buffer to a host file.", '["0:log.txt"]'),
+        ("dyninst", "Load a host file into guest memory.", '["0x20001000:payload.bin"]'),
+        ("timer_start", "Start the legacy virtual-clock timer.", "[]"),
+        ("start_budgeting", "Enter QEMU plugin budget waiting.", "[]"),
+        ("dyninst_lib", "Load an ELF through the QEMU plugin API.", '["extension.elf"]'),
+        ("debug_log", "Emit a diagnostic message.", '["initialization reached"]'),
+        ("benchmark_start", "Start a benchmark region.", "[]"),
+        ("benchmark_end", "Finish a benchmark and terminate QEMU.", '["boot"]'),
+        ("bench_tick", "Increment a benchmark tick.", "[]"),
     )
-    for name in core_virtuals:
-        register_virtual(VirtualDefinition(name=name))
-    register_virtual(VirtualDefinition(name="raiseirq", prepare=CortexMIrqPreprocessor()))
+    for name, description, args in core_virtuals:
+        register_virtual(VirtualDefinition(
+            name=name,
+            help=ConfigurationHelp(description,
+                f'[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "{name}"\nargs = {args}',
+                "docs/VirtualsAndModifiers.md"),
+        ))
+    register_virtual(VirtualDefinition(
+        name="raiseirq", prepare=CortexMIrqPreprocessor(),
+        help=ConfigurationHelp("Raise an IRQ at a trigger PC.",
+            '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "raiseirq"\nargs = ["42"]',
+            "docs/VirtualsAndModifiers.md"),
+    ))
     register_virtual(
-        VirtualDefinition(name="raise_periodic_irq", prepare=PeriodicIrqPreprocessor())
+        VirtualDefinition(name="raise_periodic_irq", prepare=PeriodicIrqPreprocessor(),
+            help=ConfigurationHelp("Register a periodic IRQ.",
+                '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "raise_periodic_irq"\nargs = ["15,1000000"]',
+                "docs/VirtualsAndModifiers.md"))
     )
 
 

@@ -100,12 +100,25 @@ Every FastDyn-owned native callback needs a Python definition, including
 callbacks without Python preparation. This lets FastDyn validate capabilities,
 normalize arguments, and detect name drift before QEMU starts.
 
-For a simple callback, register:
+For a user-configurable callback, register its behavior and its public
+configuration metadata together:
 
 ```python
-from fastdyn.virtual_preprocessing import VirtualDefinition, register_virtual
+from fastdyn.virtual_preprocessing import (
+    ConfigurationHelp, VirtualDefinition, register_virtual,
+)
 
-register_virtual(VirtualDefinition(name="example_virtual"))
+register_virtual(VirtualDefinition(
+    name="example_virtual",
+    help=ConfigurationHelp(
+        description="Describe the user-visible action.",
+        toml='''[[CPU.cpu0.virtuals]]
+at = "main+4"
+instruction = "example_virtual"
+args = ["value"]''',
+        documentation="docs/ExampleVirtual.md",
+    ),
+))
 ```
 
 For a virtual or feature module, keep the Python registration beside its
@@ -113,6 +126,12 @@ native implementation as `virtuals/<feature>/host/preprocessor.py`. FastDyn scan
 those files generically; importing the file must call `register_virtual()`
 and/or `register_run_preprocessor()`. The frontend does not import a feature
 by name.
+
+`ConfigurationHelp` is required for a feature that users should discover and
+configure. It owns the concise description, TOML fragment, and documentation
+path shown by `fastdyn help`; the generic frontend does not keep a second list
+of feature names or arguments. Omit it only for an internal callback generated
+by another plugin, such as a private allocation-return hook.
 
 `requires` names runtime capabilities needed by the callback. For example,
 `frozenset({"fmu"})` prevents the rule from being serialized unless the FMU
@@ -174,7 +193,8 @@ declarative plan: generated `VirtualInstruction` objects and artifacts.
 ```python
 from fastdyn.machine import VirtualInstruction
 from fastdyn.virtual_preprocessing import (
-    RunContext, RunDefinition, RunPrepareResult, register_run_preprocessor,
+    ConfigurationHelp, RunContext, RunDefinition, RunPrepareResult,
+    register_run_preprocessor,
 )
 
 
@@ -193,6 +213,12 @@ register_run_preprocessor(
         name="example_feature",
         prepare=ExampleFeature(),
         enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
+        help=ConfigurationHelp(
+            description="Describe the firmware-wide feature.",
+            toml='''[CPU.cpu0.plugins.example_feature]
+enabled = true''',
+            documentation="docs/ExamplePlugin.md",
+        ),
     )
 )
 ```

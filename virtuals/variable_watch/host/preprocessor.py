@@ -7,6 +7,7 @@ from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
 
 from fastdyn.virtual_preprocessing import (
+    ConfigurationHelp,
     RunContext, RunDefinition, RunPrepareResult, VirtualPreparationError,
     register_run_preprocessor,
 )
@@ -211,4 +212,7 @@ class VariableWatchPreprocessor:
 register_run_preprocessor(RunDefinition(
     name="variable_watch", prepare=VariableWatchPreprocessor(),
     enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
+    help=ConfigurationHelp("Log read/write access to a source variable or raw memory range.",
+        '[CPU.cpu0.plugins.variable_watch]\nenabled = true\nvariable = "motor_state.temperature"\naccess = "write"',
+        "docs/VariableWatch.md"),
 ))

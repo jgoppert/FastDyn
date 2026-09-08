@@ -17,55 +17,6 @@ class FeatureEntry:
     documentation: str
 
 
-_VIRTUALS = (
-    FeatureEntry("Virtual instruction", "raiseirq", "Raise an IRQ at a trigger PC.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "raiseirq"\nargs = ["42"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "pulseirq", "Pulse an IRQ at a trigger PC.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "pulseirq"\nargs = ["42"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "raise_periodic_irq", "Register a periodic IRQ.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "raise_periodic_irq"\nargs = ["15,1000000"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "updatemem", "Read or write guest memory.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "updatemem"\nargs = ["0x20001000:w:4:0xde,0xad,0xbe,0xef"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "randstate", "Randomize selected register or memory state.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "randstate"\nargs = ["0,1,2"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "printreg", "Print one QEMU register.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "printreg"\nargs = ["0"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "debug_log", "Emit a diagnostic message.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "debug_log"\nargs = ["initialization reached"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "benchmark_start", "Start a benchmark region.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "benchmark_start"\nargs = []',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "bench_tick", "Increment a benchmark tick.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "bench_tick"\nargs = []',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "benchmark_end", "Finish a benchmark and terminate QEMU.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "benchmark_end"\nargs = ["boot"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "timer_start", "Start the legacy virtual-clock timer.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "timer_start"\nargs = []',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "start_budgeting", "Enter QEMU plugin budget waiting.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "start_budgeting"\nargs = []',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "dyninst", "Load a host file into guest memory.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "dyninst"\nargs = ["0x20001000:payload.bin"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "dyninst_lib", "Load an ELF through the QEMU plugin API.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "dyninst_lib"\nargs = ["extension.elf"]',
-                 "docs/VirtualsAndModifiers.md"),
-    FeatureEntry("Virtual instruction", "dumplog", "Dump an internal logger buffer to a host file.",
-                 '[[CPU.cpu0.virtuals]]\nat = "0x08001234"\ninstruction = "dumplog"\nargs = ["0:log.txt"]',
-                 "docs/VirtualsAndModifiers.md"),
-)
-
-
 _MODIFIERS = (
     FeatureEntry("Modifier", "register assignment", "Set an architecture register at a trigger PC.",
                  '[[CPU.cpu0.modifiers]]\nat = "0x08001234"\npatch = "r0 <- 1"',
@@ -146,50 +97,39 @@ _FIRMWARE_SETTINGS = (
 )
 
 
-_PLUGIN_DETAILS = {
-    "function_counter": (
-        "Instrument selected ELF function entries and write call counts.",
-        '[CPU.cpu0.plugins.function_counter]\nenabled = true\ninclude = ["main", "my_api_*"]\nmax_functions = 64',
-        "docs/FunctionCounterPlugin.md",
-    ),
-    "function_tracer": (
-        "Trace selected function entries with DWARF-derived arguments.",
-        '[CPU.cpu0.plugins.function_tracer]\nenabled = true\ninclude = ["main", "my_api_*"]\nmax_functions = 64\nmax_events = 10000',
-        "docs/FunctionTracerPlugin.md",
-    ),
-    "introspection": (
-        "Detect and monitor a supported RTOS and its kernel resources.",
-        '[CPU.cpu0.plugins.introspection]\nenabled = true\n\n[CPU.cpu0.plugins.introspection.activity_monitor]\nenabled = true',
-        "docs/ActivityMonitor.md",
-    ),
-    "object_sanitizer": (
-        "Object-guided spatial and temporal memory-safety checking.",
-        '[CPU.cpu0.plugins.object_sanitizer]\nenabled = true\nobject = "packet_buf"',
-        "docs/ObjectSan.md",
-    ),
-    "variable_watch": (
-        "Log read/write access to a source variable or raw memory range.",
-        '[CPU.cpu0.plugins.variable_watch]\nenabled = true\nvariable = "motor_state.temperature"\naccess = "write"',
-        "docs/VariableWatch.md",
-    ),
-}
+def _registered_entries(
+    kind: str,
+    definitions: dict[str, virtual_preprocessing.VirtualDefinition]
+    | dict[str, virtual_preprocessing.RunDefinition],
+) -> tuple[FeatureEntry, ...]:
+    """Render public help declared by registered SDK definitions.
 
-
-def plugin_entries() -> tuple[FeatureEntry, ...]:
-    """Return every discovered run plugin, including future compiled-in ones."""
+    Internal callbacks deliberately omit ``help`` and are not exposed here.
+    This browser never supplies feature-specific fallback metadata.
+    """
     entries = []
-    for name in sorted(virtual_preprocessing.RUN_PREPROCESSORS, key=str.casefold):
-        description, toml, documentation = _PLUGIN_DETAILS.get(name, (
-            "Compiled-in run-wide plugin.",
-            f"[CPU.cpu0.plugins.{name}]\nenabled = true",
-            "docs/VirtualPreprocessing.md",
+    for name, definition in sorted(definitions.items(), key=lambda item: item[0].casefold()):
+        metadata = definition.help
+        if metadata is None:
+            continue
+        entries.append(FeatureEntry(
+            kind, name, metadata.description, metadata.toml, metadata.documentation,
         ))
-        entries.append(FeatureEntry("Run-wide plugin", name, description, toml, documentation))
     return tuple(entries)
 
 
+def virtual_entries() -> tuple[FeatureEntry, ...]:
+    """Return public virtuals declared through the preprocessing SDK."""
+    return _registered_entries("Virtual instruction", virtual_preprocessing.VIRTUAL_DEFINITIONS)
+
+
+def plugin_entries() -> tuple[FeatureEntry, ...]:
+    """Return public run plugins declared through the preprocessing SDK."""
+    return _registered_entries("Run-wide plugin", virtual_preprocessing.RUN_PREPROCESSORS)
+
+
 def all_entries() -> tuple[FeatureEntry, ...]:
-    return _VIRTUALS + plugin_entries()
+    return virtual_entries() + plugin_entries()
 
 
 def modifier_entries() -> tuple[FeatureEntry, ...]:
@@ -222,6 +162,14 @@ def _documentation_menu(title: str, entries: tuple[DocumentationEntry, ...]) -> 
     return Menu(title, choices, lambda entry: entry)
 
 
+def _feature_documentation(entries: tuple[FeatureEntry, ...]) -> tuple[DocumentationEntry, ...]:
+    """Build contextual documentation choices from SDK-provided feature help."""
+    docs: dict[str, DocumentationEntry] = {}
+    for entry in entries:
+        docs.setdefault(entry.documentation, DocumentationEntry(entry.documentation, entry.description))
+    return tuple(docs[path] for path in sorted(docs, key=str.casefold))
+
+
 def _settings_menu(title: str, entries: tuple[FeatureEntry, ...], docs: tuple[DocumentationEntry, ...]) -> Menu:
     choices = _entry_menu(title, entries).choices + (
         ("Documentation", _documentation_menu(f"{title}  ›  documentation", docs)),
@@ -231,17 +179,17 @@ def _settings_menu(title: str, entries: tuple[FeatureEntry, ...], docs: tuple[Do
 
 def build_feature_browser() -> Menu:
     """Build the top-level virtual/plugin picker."""
-    virtual_menu = _entry_menu("FastDyn virtuals  ›  instruction", _VIRTUALS)
-    plugin_menu = _entry_menu("FastDyn plugins  ›  run-wide plugin", plugin_entries())
+    virtuals = virtual_entries()
+    plugins = plugin_entries()
+    virtual_menu = _entry_menu("FastDyn virtuals  ›  instruction", virtuals)
+    plugin_menu = _entry_menu("FastDyn plugins  ›  run-wide plugin", plugins)
     choices = (
-        (f"Virtual instructions  ({len(_VIRTUALS)})", virtual_menu),
+        (f"Virtual instructions  ({len(virtuals)})", virtual_menu),
         (f"Run-wide plugins  ({len(plugin_menu.choices)})", plugin_menu),
-        ("Documentation", _documentation_menu("FastDyn virtuals and plugins  ›  documentation", (
-            DocumentationEntry("docs/VirtualPluginBrowser.md", "Virtual/plugin discovery"),
-            DocumentationEntry("docs/VirtualsAndModifiers.md", "Virtual instruction grammar"),
-            DocumentationEntry("docs/VirtualPreprocessing.md", "Preprocessing SDK"),
-            DocumentationEntry("docs/WritingVirtuals.md", "Virtual and plugin contributor guide"),
-        ))),
+        ("Documentation", _documentation_menu(
+            "FastDyn virtuals and plugins  ›  documentation",
+            _feature_documentation(virtuals + plugins),
+        )),
     )
     return Menu("FastDyn virtuals and plugins", choices, lambda item: item)
 

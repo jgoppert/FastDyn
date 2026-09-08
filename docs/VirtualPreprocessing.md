@@ -53,6 +53,7 @@ one.
 
 ```python
 from fastdyn.virtual_preprocessing import (
+    ConfigurationHelp,
     VirtualContext,
     VirtualDefinition,
     VirtualPrepareResult,
@@ -75,7 +76,18 @@ class ExamplePreprocessor:
 
 
 register_virtual(
-    VirtualDefinition(name="example_virtual", prepare=ExamplePreprocessor())
+    VirtualDefinition(
+        name="example_virtual",
+        prepare=ExamplePreprocessor(),
+        help=ConfigurationHelp(
+            description="Prepare and consume an example payload.",
+            toml='''[[CPU.cpu0.virtuals]]
+at = "main+4"
+instruction = "example_virtual"
+args = ["input.bin"]''',
+            documentation="docs/ExampleVirtual.md",
+        ),
+    )
 )
 ```
 
@@ -92,6 +104,13 @@ capabilities are unavailable. Hosts can add native-build capabilities through
 the machine's public capability set without requiring a preprocessor to read
 build files or frontend internals.
 
+`ConfigurationHelp` is the public configuration-discovery contract. Add it to
+every virtual intended for users to configure. FastDyn's generic help browser
+reads this metadata directly from the registered definition; it contains no
+catalogue of virtual names, arguments, TOML fragments, or documentation paths.
+Internal implementation callbacks omit `help`, so they are not advertised as
+user-configurable virtuals.
+
 FastDyn supplies built-in definitions for its core callbacks. `raiseirq` and
 `raise_periodic_irq` use preprocessors to turn symbolic Cortex-M SVD IRQ names
 into the exception vectors expected by the native callback. Numeric arguments
@@ -105,6 +124,7 @@ to a user-authored virtual.
 
 ```python
 from fastdyn.virtual_preprocessing import (
+    ConfigurationHelp,
     RunContext,
     RunDefinition,
     RunPrepareResult,
@@ -124,6 +144,12 @@ register_run_preprocessor(
         name="example",
         prepare=ExampleRunPreprocessor(),
         enabled=lambda cpu: bool(getattr(cpu, "example_enabled", False)),
+        help=ConfigurationHelp(
+            description="Prepare example firmware-wide analysis.",
+            toml='''[CPU.cpu0.plugins.example]
+enabled = true''',
+            documentation="docs/ExamplePlugin.md",
+        ),
     )
 )
 ```
@@ -133,6 +159,11 @@ registered `RunDefinition`; it does not branch on a feature name. Each
 `RunContext` contains that module's TOML `settings`, a namespaced
 `plugin_artifact_path()` allocator, a FastDyn `logger`, and a generic cleanup
 list in `RunPrepareResult` for resources started during preparation.
+
+As with virtuals, a user-configurable run plugin must supply
+`ConfigurationHelp`. This makes its configuration snippet and documentation
+discoverable through `fastdyn help` without a frontend change. A private or
+internal run module may omit it.
 
 Use the generic TOML namespace for a run module:
 

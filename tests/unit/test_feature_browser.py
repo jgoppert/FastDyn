@@ -2,7 +2,7 @@
 
 from click.testing import CliRunner
 
-from fastdyn import feature_browser, main, platform_browser
+from fastdyn import feature_browser, main, platform_browser, virtual_preprocessing
 
 
 def test_feature_browser_exposes_registered_run_plugins_and_toml_examples():
@@ -11,6 +11,19 @@ def test_feature_browser_exposes_registered_run_plugins_and_toml_examples():
     assert {"function_counter", "function_tracer", "introspection", "object_sanitizer", "variable_watch"} <= set(plugins)
     assert "[CPU.cpu0.plugins.variable_watch]" in plugins["variable_watch"].toml
     assert "[CPU.cpu0.plugins.introspection]" in plugins["introspection"].toml
+
+
+def test_feature_browser_renders_only_sdk_declared_metadata():
+    virtuals = {entry.name: entry for entry in feature_browser.virtual_entries()}
+    plugins = {entry.name: entry for entry in feature_browser.plugin_entries()}
+
+    assert virtuals["raiseirq"].description == (
+        virtual_preprocessing.VIRTUAL_DEFINITIONS["raiseirq"].help.description
+    )
+    assert plugins["variable_watch"].toml == (
+        virtual_preprocessing.RUN_PREPROCESSORS["variable_watch"].help.toml
+    )
+    assert "object_sanitizer_alloc_call" not in virtuals
 
 
 def test_feature_browser_builds_virtual_and_plugin_branches():
@@ -26,8 +39,12 @@ def test_feature_browser_builds_virtual_and_plugin_branches():
     assert "variable =" in plugin_menu.advance(watch).toml
 
     documentation_menu = root.advance(root.choices[-1][1])
-    documentation = documentation_menu.advance(documentation_menu.choices[0][1])
-    assert documentation.path == "docs/VirtualPluginBrowser.md"
+    documentation = {
+        documentation_menu.advance(value).path
+        for _, value in documentation_menu.choices
+    }
+    assert "docs/VirtualsAndModifiers.md" in documentation
+    assert "docs/VariableWatch.md" in documentation
 
 
 def test_modifier_browser_exposes_modifier_forms():

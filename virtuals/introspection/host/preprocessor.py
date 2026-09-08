@@ -7,6 +7,7 @@ from typing import Callable
 from .activity_monitor import start_activity_monitor
 from .introspect import introspect_rtos
 from fastdyn.virtual_preprocessing import (
+    ConfigurationHelp,
     RunContext,
     RunDefinition,
     RunPrepareResult,
@@ -74,5 +75,8 @@ register_run_preprocessor(
         name="introspection",
         prepare=IntrospectionRunPreprocessor(),
         enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
+        help=ConfigurationHelp("Detect and monitor a supported RTOS and its kernel resources.",
+            '[CPU.cpu0.plugins.introspection]\nenabled = true\n\n[CPU.cpu0.plugins.introspection.activity_monitor]\nenabled = true',
+            "docs/ActivityMonitor.md"),
     )
 )

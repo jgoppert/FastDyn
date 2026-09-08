@@ -15,6 +15,7 @@ from elftools.elf.sections import SymbolTableSection
 
 from fastdyn.machine import VirtualInstruction
 from fastdyn.virtual_preprocessing import (
+    ConfigurationHelp,
     RunContext, RunDefinition, RunPrepareResult, VirtualDefinition,
     VirtualPreparationError, register_run_preprocessor, register_virtual,
 )
@@ -382,4 +383,10 @@ class ObjectSanRunPreprocessor:
 register_virtual(VirtualDefinition(name="object_sanitizer_alloc_call"))
 register_virtual(VirtualDefinition(name="object_sanitizer_alloc_return"))
 register_virtual(VirtualDefinition(name="object_sanitizer_free"))
-register_run_preprocessor(RunDefinition(name="object_sanitizer", prepare=ObjectSanRunPreprocessor(), enabled=lambda ctx: bool(ctx.settings.get("enabled", False))))
+register_run_preprocessor(RunDefinition(
+    name="object_sanitizer", prepare=ObjectSanRunPreprocessor(),
+    enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
+    help=ConfigurationHelp("Object-guided spatial and temporal memory-safety checking.",
+        '[CPU.cpu0.plugins.object_sanitizer]\nenabled = true\nobject = "packet_buf"',
+        "docs/ObjectSan.md"),
+))

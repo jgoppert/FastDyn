@@ -9,6 +9,7 @@ from elftools.elf.sections import SymbolTableSection
 
 from fastdyn.machine import VirtualInstruction
 from fastdyn.virtual_preprocessing import (
+    ConfigurationHelp,
     RunContext,
     RunDefinition,
     RunPrepareResult,
@@ -119,5 +120,8 @@ register_run_preprocessor(
         name="function_counter",
         prepare=FunctionCounterRunPreprocessor(),
         enabled=lambda ctx: bool(ctx.settings.get("enabled", False)),
+        help=ConfigurationHelp("Instrument selected ELF function entries and write call counts.",
+            '[CPU.cpu0.plugins.function_counter]\nenabled = true\ninclude = ["main", "my_api_*"]\nmax_functions = 64',
+            "docs/FunctionCounterPlugin.md"),
     )
 )

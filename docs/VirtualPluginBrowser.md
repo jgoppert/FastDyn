@@ -14,6 +14,12 @@ The first menu separates two different configuration concepts:
 - **Run-wide plugins** prepare a firmware-wide feature before QEMU starts.
   Selecting one prints its `[CPU.cpu0.plugins.<name>]` TOML block.
 
+The menu is generated from the public `ConfigurationHelp` metadata registered
+by each virtual or plugin. Adding a feature therefore requires no edit to the
+frontend: its owner supplies the description, TOML example, and documentation
+path beside its registration. Internal callbacks simply omit that metadata and
+are not presented to users.
+
 For example, selecting VariableWatch shows:
 
 ```toml
