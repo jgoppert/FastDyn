@@ -8,6 +8,7 @@ import subprocess
 import json
 import signal
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 from . import fastdyn_log
@@ -23,6 +24,7 @@ from . import swarm as swarm_runner
 from . import timing
 from .fuzzer import fuzzer
 from .utils import parse_config as parse_helper
+from . import platform_browser
 from fastdyn.binary.symmap import SymbolResolver
 from fastdyn.binary.symmap.providers.dwarf import DwarfProvider
 import fastdyn.targets.qemu_target as qemu_target
@@ -93,6 +95,97 @@ def _auto_build_fmu(config, fmu_name, skip_build):
 @click.version_option(prog_name="Fastdyn Framework",version=__version__)
 def cli():
     log.info('****** Fastdyn Framework {0} *******'.format(__version__ ))
+
+
+@cli.command(
+    'platforms',
+    help=(
+        'Browse FastDyn architecture presets and CMSIS-SVD platform names. '
+        'On an interactive terminal, opens an inline vendor/platform browser. '
+        'Pass a vendor or platform fragment for plain-text output, for example: fastdyn platforms STM32.'
+    ),
+)
+@click.argument('query', required=False, metavar='VENDOR_OR_PLATFORM')
+@click.option(
+    '--browse/--no-browse',
+    default=None,
+    help='Force or disable the inline platform browser.',
+)
+@click.option(
+    '-s', '--svd',
+    type=click.Path(resolve_path=True, exists=True),
+    default='third_party/common/cmsis-svd-data',
+    show_default=True,
+    metavar='PATH',
+    help='CMSIS-SVD file or catalog directory to inspect.',
+)
+def platforms(query, browse, svd):
+    """Make valid SVD ``platform`` values discoverable from the CLI."""
+    try:
+        all_platforms = parse_helper.list_svd_platforms(svd)
+    except parse_helper.SvdResolutionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if browse is None:
+        browse = not query and sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        try:
+            selected = platform_browser.browse_platforms(all_platforms)
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if isinstance(selected, platform_browser.ArchitectureEntry):
+            click.echo(f'Selected architecture target: {selected.name}')
+            click.echo('  [[CPU.cpu0]]')
+            click.echo(f'  arch = "{selected.architecture}"')
+            click.echo(f'  machine = "{selected.machine}"')
+            click.echo(f'  cpu = "{selected.cpu}"')
+        elif selected:
+            click.echo(f'Selected platform: {selected.name}')
+            click.echo(f'  [Machine] platform = "{selected.name}"')
+            click.echo(f'  SVD: {selected.path}')
+        return
+
+    click.echo('FastDyn architecture presets used by the bundled configurations:')
+    click.echo('  arm      Cortex-M and Cortex-A QEMU targets')
+    click.echo('  riscv64  QEMU virt / rv64 target')
+    click.echo('  x86_64   QEMU base_generic / qemu64 target')
+    click.echo('')
+
+    matches = parse_helper.find_svd_platforms(svd, query) if query else all_platforms
+    if query:
+        if not matches:
+            click.echo(f"No SVD platforms match {query!r}.")
+            click.echo('Available vendors:')
+            vendors = sorted({vendor for vendor, _platform, _path in all_platforms}, key=str.casefold)
+            click.echo(f"  {', '.join(vendors)}")
+            return
+
+        grouped = defaultdict(list)
+        for vendor, platform, _path in matches:
+            grouped[vendor].append(platform)
+
+        click.echo(f"{len(matches)} SVD platform(s) match {query!r}:")
+        for vendor in sorted(grouped, key=str.casefold):
+            click.echo(f"  {vendor} ({len(grouped[vendor])}):")
+            for platform in grouped[vendor]:
+                click.echo(f"    {platform}")
+        return
+
+    grouped = defaultdict(list)
+    for vendor, platform, _path in all_platforms:
+        grouped[vendor].append(platform)
+
+    unique_platforms = {platform.casefold() for _vendor, platform, _path in all_platforms}
+    click.echo(
+        f"CMSIS-SVD catalog: {len(unique_platforms)} unique platform identifier(s) "
+        f"from {len(all_platforms)} SVD file(s) across {len(grouped)} vendor(s)."
+    )
+    click.echo('Vendors (platform files):')
+    for vendor in sorted(grouped, key=str.casefold):
+        click.echo(f"  {vendor}: {len(grouped[vendor])}")
+    click.echo('')
+    click.echo('Browse interactively with: fastdyn platforms --browse')
+    click.echo('List a family or vendor with: fastdyn platforms STM32')
 
 
 @cli.command('run',help= 'Runs the firmware on QEMU using the passed config file.')
@@ -918,8 +1011,7 @@ def generate(hardware_log, slave_model, reference_model, firmware_code, board, p
                 auto_discover=False,    # don’t do repo search when user already gave a path
             )
         except parse_helper.SvdResolutionError as e:
-            log.info(f"Skipping SVD resolution for platform '{platform}': SVD not required/applicable.")
-            svd_device = None
+            raise click.ClickException(str(e)) from e
 
         log.info(f"Using SVD: {svd_file} (key='{svd_key}')")
         svd_device = parse_helper.get_svd_device(svd_file)
@@ -1202,8 +1294,7 @@ def verifier(hardware_log, emulation_log, device_models, model_names, board,
             auto_discover=False,
         )
     except parse_helper.SvdResolutionError as e:
-        log.info(f"Skipping SVD resolution for platform '{platform}': SVD not required/applicable.")
-        svd_device = None
+        raise click.ClickException(str(e)) from e
 
     log.info(f"Using SVD: {svd_file} (key='{svd_key}')")
     svd_device = parse_helper.get_svd_device(svd_file)

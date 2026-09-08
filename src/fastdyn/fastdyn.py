@@ -262,7 +262,14 @@ class Machine:
                 auto_discover=False,    # don’t do repo search when user already gave a path
             )
         except parse_helper.SvdResolutionError as e:
-            fastdyn_log.info(f"Skipping SVD resolution for platform '{platform}': SVD not required/applicable.")
+            if platform.lower().startswith("generic-"):
+                fastdyn_log.info(
+                    f"Skipping CMSIS SVD resolution for generic platform '{platform}'."
+                )
+            else:
+                fastdyn_log.warning(
+                    f"Could not resolve CMSIS SVD for platform '{platform}': {e}"
+                )
             return
 
         fastdyn_log.info(f"Using SVD: {svd_file} (key='{svd_key}')")

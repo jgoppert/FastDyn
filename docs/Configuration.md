@@ -63,6 +63,25 @@ edge_coverage = false
 print_command = false
 ```
 
+To see valid architecture presets and the SVD-backed values accepted by
+`[Machine].platform`, use the CLI catalog:
+
+```bash
+fastdyn platforms              # interactive browser in a terminal
+fastdyn platforms STM32
+```
+
+The browser first lets you choose a CPU architecture/QEMU target or a CMSIS-SVD
+device platform. The generic Cortex-M branch exposes all CPU models supported
+by the patched QEMU target through Cortex-M55. The device-platform branch is a
+small inline picker through vendor names, catalog directories where available,
+product families, and finally the exact platform identifier. It does not
+require a search term or fill the terminal.
+It redraws in place and disappears after a selection, then prints ready-to-copy
+CPU or `platform = "..."` TOML settings. The second command lists every
+matching platform value as plain text. Use `--no-browse` for the vendor summary
+in a terminal, or `--browse` to force the browser.
+
 When `edge_coverage = true`, FastDyn also writes cumulative edge coverage to
 `edges.txt` alongside `bbl.txt` in the active work directory.
 

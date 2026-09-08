@@ -274,9 +274,91 @@ Helper functions to parse the CMSIS-SVD
 import os
 import sys
 import glob
+import difflib
 
 class SvdResolutionError(Exception):
     pass
+
+
+def list_svd_platforms(svd_path: str):
+    """Return the CMSIS-SVD platforms available below *svd_path*.
+
+    Each result is ``(vendor, platform, path)``.  The vendor is the first
+    directory below the supplied catalog root, which matches the layout used
+    by cmsis-svd-data.  A standalone SVD is reported as ``Custom``.
+
+    This deliberately reads directory entries only: listing the catalog must
+    remain fast even when the SVD XML files themselves are large.
+    """
+    if not svd_path:
+        raise SvdResolutionError("No SVD path provided.")
+
+    root_path = os.path.abspath(os.path.expanduser(svd_path))
+    if not os.path.exists(root_path):
+        raise SvdResolutionError(f"SVD path does not exist: {root_path}")
+
+    if os.path.isfile(root_path):
+        if not root_path.lower().endswith(".svd"):
+            raise SvdResolutionError(f"Provided file is not an .svd: {root_path}")
+        return [("Custom", os.path.splitext(os.path.basename(root_path))[0], root_path)]
+
+    if not os.path.isdir(root_path):
+        raise SvdResolutionError(f"SVD path is neither a file nor a directory: {root_path}")
+
+    # cmsis-svd-data keeps vendor directories below ``data/``.  Accept both
+    # the repository root and the data directory so vendor grouping stays
+    # useful with FastDyn's normal default path.
+    data_directory = os.path.join(root_path, "data")
+    if os.path.isdir(data_directory):
+        root_path = data_directory
+
+    platforms = []
+    for directory, dirs, files in os.walk(root_path):
+        # Stable output makes both the CLI and duplicate-key resolution
+        # predictable across filesystems.
+        dirs.sort(key=str.lower)
+        for filename in sorted(files, key=str.lower):
+            if not filename.lower().endswith(".svd"):
+                continue
+
+            full_path = os.path.abspath(os.path.join(directory, filename))
+            relative_directory = os.path.relpath(directory, root_path)
+            vendor = (
+                relative_directory.split(os.sep, 1)[0]
+                if relative_directory != "."
+                else "Custom"
+            )
+            platform = os.path.splitext(filename)[0]
+            platforms.append((vendor, platform, full_path))
+
+    return platforms
+
+
+def find_svd_platforms(svd_path: str, query: str | None = None):
+    """List catalog entries whose vendor or platform contains ``query``."""
+    platforms = list_svd_platforms(svd_path)
+    if not query:
+        return platforms
+
+    query = query.casefold()
+    return [
+        entry for entry in platforms
+        if query in entry[0].casefold() or query in entry[1].casefold()
+    ]
+
+
+def suggest_svd_platforms(platforms, requested: str, limit: int = 8):
+    """Return close platform-name matches suitable for an error message."""
+    requested = (requested or "").strip()
+    if not requested:
+        return []
+
+    names = sorted({platform for _vendor, platform, _path in platforms}, key=str.casefold)
+    normalized = {name.casefold(): name for name in names}
+    matches = difflib.get_close_matches(
+        requested.casefold(), normalized.keys(), n=limit, cutoff=0.45
+    )
+    return [normalized[match] for match in matches]
 
 
 def _find_ci_key(keys, target):
@@ -309,38 +391,12 @@ def discover_svd_files(svd_path: str):
         raise SvdResolutionError("No SVD path provided.")
 
     svd_path = os.path.abspath(os.path.expanduser(svd_path))
-
-    if not os.path.exists(svd_path):
-        raise SvdResolutionError(f"SVD path does not exist: {svd_path}")
-
+    is_file = os.path.isfile(svd_path)
     svd_map = {}
-    is_file = False
-
-    # Case 1: single file
-    if os.path.isfile(svd_path):
-        if not svd_path.lower().endswith(".svd"):
-            raise SvdResolutionError(f"Provided file is not an .svd: {svd_path}")
-
-        device_name = os.path.splitext(os.path.basename(svd_path))[0]
-        svd_map[device_name] = svd_path
-        is_file = True
-        return svd_map, is_file
-
-    # Case 2: directory
-    if not os.path.isdir(svd_path):
-        raise SvdResolutionError(f"SVD path is neither a file nor a directory: {svd_path}")
-
-    for root, _, files in os.walk(svd_path):
-        for filename in files:
-            if filename.lower().endswith(".svd"):
-                device_name = os.path.splitext(filename)[0]
-                full_path = os.path.abspath(os.path.join(root, filename))
-
-                # Keep first occurrence (current behavior)
-                if device_name in svd_map:
-                    continue
-
-                svd_map[device_name] = full_path
+    for _vendor, device_name, full_path in list_svd_platforms(svd_path):
+        # Keep the first occurrence for compatibility with the existing
+        # resolver. ``list_svd_platforms`` has a deterministic traversal.
+        svd_map.setdefault(device_name, full_path)
 
     return svd_map, is_file
 
@@ -421,9 +477,18 @@ def resolve_svd(
                 "Pass --svd <file-or-directory> explicitly."
             )
 
+    suggestions = suggest_svd_platforms(
+        [("Catalog", key, path) for key, path in svd_map.items()],
+        platform_or_board,
+    )
+    suggestion_text = (
+        f" Closest available platform names: {', '.join(suggestions)}."
+        if suggestions else ""
+    )
     raise SvdResolutionError(
-        f"Could not resolve SVD for '{platform_or_board}' from '{svd_input}'. "
-        "Pass --svd <file-or-directory> explicitly."
+        f"Could not resolve SVD for '{platform_or_board}' from '{svd_input}'."
+        f"{suggestion_text} Run `fastdyn platforms {platform_or_board}` to list "
+        "matching valid options, or pass --svd <file-or-directory> explicitly."
     )
 
 def get_svd_device(svd_file):
