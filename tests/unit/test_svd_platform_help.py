@@ -39,7 +39,7 @@ def test_lists_catalog_platforms_by_vendor_and_query(tmp_path):
 def test_platforms_command_exposes_architectures_and_matching_svd_values(tmp_path):
     catalog = _catalog(tmp_path)
 
-    result = CliRunner().invoke(main.cli, ["platforms", "STM32", "--svd", str(catalog)])
+    result = CliRunner().invoke(main.cli, ["help", "platforms", "STM32", "--svd", str(catalog)])
 
     assert result.exit_code == 0
     assert "FastDyn architecture presets" in result.output
@@ -48,11 +48,11 @@ def test_platforms_command_exposes_architectures_and_matching_svd_values(tmp_pat
     assert "STM32F429" in result.output
     assert "STM32H753x" in result.output
 
-    summary = CliRunner().invoke(main.cli, ["platforms", "--svd", str(catalog)])
+    summary = CliRunner().invoke(main.cli, ["help", "platforms", "--svd", str(catalog)])
 
     assert summary.exit_code == 0
     assert "3 unique platform identifier(s) from 3 SVD file(s) across 2 vendor(s)" in summary.output
-    assert "fastdyn platforms --browse" in summary.output
+    assert "fastdyn help platforms --browse" in summary.output
 
 
 def test_platform_browser_groups_flat_catalogs_by_product_family():
@@ -105,7 +105,7 @@ def test_platforms_browser_prints_selected_toml_value(tmp_path, monkeypatch):
     selected = platform_browser.PlatformEntry("STMicro", "STM32F429", "/tmp/STM32F429.svd")
     monkeypatch.setattr(main.platform_browser, "browse_platforms", lambda _entries: selected)
 
-    result = CliRunner().invoke(main.cli, ["platforms", "--browse", "--svd", str(catalog)])
+    result = CliRunner().invoke(main.cli, ["help", "platforms", "--browse", "--svd", str(catalog)])
 
     assert result.exit_code == 0
     assert "Selected platform: STM32F429" in result.output
@@ -119,7 +119,7 @@ def test_platforms_browser_prints_selected_architecture_toml(tmp_path, monkeypat
     )
     monkeypatch.setattr(main.platform_browser, "browse_platforms", lambda _entries: selected)
 
-    result = CliRunner().invoke(main.cli, ["platforms", "--browse", "--svd", str(catalog)])
+    result = CliRunner().invoke(main.cli, ["help", "platforms", "--browse", "--svd", str(catalog)])
 
     assert result.exit_code == 0
     assert "Selected architecture target: RISC-V 64" in result.output
@@ -139,4 +139,4 @@ def test_svd_resolution_error_suggests_the_catalog_command(tmp_path):
         raise AssertionError("Expected an unresolved SVD platform to fail")
 
     assert "Closest available platform names: STM32F429" in message
-    assert "fastdyn platforms STM32F492" in message
+    assert "fastdyn help platforms STM32F492" in message

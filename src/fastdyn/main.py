@@ -97,12 +97,68 @@ def cli():
     log.info('****** Fastdyn Framework {0} *******'.format(__version__ ))
 
 
-@cli.command(
+def _show_platform_selection(selected):
+    if isinstance(selected, platform_browser.ArchitectureEntry):
+        click.echo(f'Selected architecture target: {selected.name}')
+        click.echo('  [[CPU.cpu0]]')
+        click.echo(f'  arch = "{selected.architecture}"')
+        click.echo(f'  machine = "{selected.machine}"')
+        click.echo(f'  cpu = "{selected.cpu}"')
+    elif isinstance(selected, platform_browser.PlatformEntry):
+        click.echo(f'Selected platform: {selected.name}')
+        click.echo(f'  [Machine] platform = "{selected.name}"')
+        click.echo(f'  SVD: {selected.path}')
+    elif isinstance(selected, platform_browser.DocumentationEntry):
+        click.echo(f'Documentation: {selected.path}')
+        click.echo(selected.description)
+
+
+def _show_feature_selection(selected):
+    if isinstance(selected, platform_browser.DocumentationEntry):
+        click.echo(f'Documentation: {selected.path}')
+        click.echo(selected.description)
+        return
+    click.echo(f'Selected {selected.kind.lower()}: {selected.name}')
+    click.echo(selected.description)
+    click.echo('')
+    click.echo(selected.toml)
+    click.echo(f'\nDocumentation: {selected.documentation}')
+
+
+@cli.group('help', invoke_without_command=True)
+@click.option('--browse/--no-browse', default=None,
+              help='Force or disable the interactive configuration-help menu.')
+@click.option('-s', '--svd', default='third_party/common/cmsis-svd-data',
+              type=click.Path(resolve_path=True, exists=True), metavar='PATH',
+              help='CMSIS-SVD file or catalog directory used by the top-level browser.')
+@click.pass_context
+def help_command(ctx, browse, svd):
+    """Browse configuration choices and obtain ready-to-copy TOML."""
+    if ctx.invoked_subcommand is None:
+        if browse is None:
+            browse = sys.stdin.isatty() and sys.stdout.isatty()
+        if not browse:
+            click.echo(ctx.get_help())
+            return
+        from . import feature_browser, help_browser
+        try:
+            selected = help_browser.browse_help(svd)
+        except (RuntimeError, parse_helper.SvdResolutionError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        if isinstance(selected, (platform_browser.ArchitectureEntry, platform_browser.PlatformEntry)):
+            _show_platform_selection(selected)
+        elif isinstance(selected, feature_browser.FeatureEntry):
+            _show_feature_selection(selected)
+        elif isinstance(selected, platform_browser.DocumentationEntry):
+            _show_platform_selection(selected)
+
+
+@help_command.command(
     'platforms',
     help=(
         'Browse FastDyn architecture presets and CMSIS-SVD platform names. '
         'On an interactive terminal, opens an inline vendor/platform browser. '
-        'Pass a vendor or platform fragment for plain-text output, for example: fastdyn platforms STM32.'
+        'Pass a vendor or platform fragment for plain-text output, for example: fastdyn help platforms STM32.'
     ),
 )
 @click.argument('query', required=False, metavar='VENDOR_OR_PLATFORM')
@@ -133,16 +189,7 @@ def platforms(query, browse, svd):
             selected = platform_browser.browse_platforms(all_platforms)
         except RuntimeError as exc:
             raise click.ClickException(str(exc)) from exc
-        if isinstance(selected, platform_browser.ArchitectureEntry):
-            click.echo(f'Selected architecture target: {selected.name}')
-            click.echo('  [[CPU.cpu0]]')
-            click.echo(f'  arch = "{selected.architecture}"')
-            click.echo(f'  machine = "{selected.machine}"')
-            click.echo(f'  cpu = "{selected.cpu}"')
-        elif selected:
-            click.echo(f'Selected platform: {selected.name}')
-            click.echo(f'  [Machine] platform = "{selected.name}"')
-            click.echo(f'  SVD: {selected.path}')
+        _show_platform_selection(selected)
         return
 
     click.echo('FastDyn architecture presets used by the bundled configurations:')
@@ -184,8 +231,174 @@ def platforms(query, browse, svd):
     for vendor in sorted(grouped, key=str.casefold):
         click.echo(f"  {vendor}: {len(grouped[vendor])}")
     click.echo('')
-    click.echo('Browse interactively with: fastdyn platforms --browse')
-    click.echo('List a family or vendor with: fastdyn platforms STM32')
+    click.echo('Browse interactively with: fastdyn help platforms --browse')
+    click.echo('List a family or vendor with: fastdyn help platforms STM32')
+
+
+@help_command.command(
+    'virtuals',
+    help=(
+        'Browse user-configurable FastDyn virtual instructions and run-wide plugins. '
+        'An interactive terminal opens an inline picker with ready-to-copy TOML.'
+    ),
+)
+@click.option(
+    '--browse/--no-browse',
+    default=None,
+    help='Force or disable the inline virtual/plugin browser.',
+)
+def virtuals(browse):
+    """Make virtual and plugin TOML configuration discoverable from the CLI."""
+    from . import feature_browser
+
+    if browse is None:
+        browse = sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        try:
+            selected = feature_browser.browse_features()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if selected:
+            _show_feature_selection(selected)
+        return
+
+    entries = feature_browser.all_entries()
+    for kind in ("Virtual instruction", "Run-wide plugin"):
+        grouped = [entry for entry in entries if entry.kind == kind]
+        click.echo(f'{kind}s:')
+        for entry in grouped:
+            click.echo(f'  {entry.name:<22} {entry.description}')
+        click.echo('')
+    click.echo('Browse interactively with: fastdyn help virtuals --browse')
+
+
+help_command.add_command(virtuals, 'plugins')
+
+
+@help_command.command(
+    'modifiers',
+    help='Browse modifier forms and show ready-to-copy TOML examples.',
+)
+@click.option(
+    '--browse/--no-browse',
+    default=None,
+    help='Force or disable the inline modifier browser.',
+)
+def modifiers(browse):
+    """Make modifier TOML configuration discoverable from the CLI."""
+    from . import feature_browser
+
+    if browse is None:
+        browse = sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        try:
+            selected = feature_browser.browse_modifiers()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if selected:
+            _show_feature_selection(selected)
+        return
+
+    click.echo('Modifier forms:')
+    for entry in feature_browser.modifier_entries():
+        click.echo(f'  {entry.name:<30} {entry.description}')
+    click.echo('\nBrowse interactively with: fastdyn help modifiers --browse')
+
+
+@help_command.command(
+    'device-models',
+    help='Browse peripheral device-model forms and show ready-to-copy TOML examples.',
+)
+@click.option(
+    '--browse/--no-browse',
+    default=None,
+    help='Force or disable the inline device-model browser.',
+)
+def device_models(browse):
+    """Make peripheral device-model TOML configuration discoverable from the CLI."""
+    from . import feature_browser
+
+    if browse is None:
+        browse = sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        try:
+            selected = feature_browser.browse_device_models()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if selected:
+            _show_feature_selection(selected)
+        return
+
+    click.echo('Device models:')
+    for entry in feature_browser.device_model_entries():
+        click.echo(f'  {entry.name:<14} {entry.description}')
+    click.echo('\nBrowse interactively with: fastdyn help device-models --browse')
+
+
+@help_command.command('machine', help='Browse QEMU and run-wide [Machine] settings.')
+@click.option('--browse/--no-browse', default=None,
+              help='Force or disable the inline machine-settings browser.')
+def machine_settings(browse):
+    """Make essential Machine TOML settings discoverable from the CLI."""
+    from . import feature_browser
+    if browse is None:
+        browse = sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        try:
+            selected = feature_browser.browse_machine()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if selected:
+            _show_feature_selection(selected)
+        return
+    click.echo('Machine settings:')
+    for entry in feature_browser.machine_entries():
+        click.echo(f'  {entry.name:<28} {entry.description}')
+    click.echo('\nBrowse interactively with: fastdyn help machine --browse')
+
+
+@help_command.command('memory', help='Browse primary and additional memory-bank TOML settings.')
+@click.option('--browse/--no-browse', default=None,
+              help='Force or disable the inline memory browser.')
+def memory(browse):
+    """Make essential memory TOML settings discoverable from the CLI."""
+    from . import feature_browser
+    if browse is None:
+        browse = sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        try:
+            selected = feature_browser.browse_memory()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if selected:
+            _show_feature_selection(selected)
+        return
+    click.echo('Memory settings:')
+    for entry in feature_browser.memory_entries():
+        click.echo(f'  {entry.name:<28} {entry.description}')
+    click.echo('\nBrowse interactively with: fastdyn help memory --browse')
+
+
+@help_command.command('firmware', help='Browse firmware binary and CPU startup TOML settings.')
+@click.option('--browse/--no-browse', default=None,
+              help='Force or disable the inline firmware/CPU browser.')
+def firmware(browse):
+    """Make firmware and CPU startup TOML settings discoverable from the CLI."""
+    from . import feature_browser
+    if browse is None:
+        browse = sys.stdin.isatty() and sys.stdout.isatty()
+    if browse:
+        try:
+            selected = feature_browser.browse_firmware()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if selected:
+            _show_feature_selection(selected)
+        return
+    click.echo('Firmware and CPU settings:')
+    for entry in feature_browser.firmware_entries():
+        click.echo(f'  {entry.name:<28} {entry.description}')
+    click.echo('\nBrowse interactively with: fastdyn help firmware --browse')
 
 
 @cli.command('run',help= 'Runs the firmware on QEMU using the passed config file.')

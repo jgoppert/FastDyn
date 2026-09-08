@@ -41,6 +41,13 @@ class ArchitectureEntry:
     cpu: str
 
 
+@dataclass(frozen=True)
+class DocumentationEntry:
+    """A documentation leaf in an interactive configuration-help tree."""
+    path: str
+    description: str
+
+
 ARCHITECTURE_PRESETS = (
     ArchitectureEntry("ARM Cortex-M (Stellaris)", "LM3S6965EVB / Cortex-M3", "arm", "lm3s6965evb", "cortex-m3"),
     ArchitectureEntry("ARM Cortex-A", "QEMU virt / Cortex-A7", "arm", "virt", "cortex-a7"),
@@ -208,12 +215,27 @@ def build_platform_browser(entries: Iterable[tuple[str, str, str]]) -> _Menu | N
     """Build the top-level target browser for architecture and SVD choices."""
     svd_menu = _build_svd_browser(entries)
     if svd_menu is None:
-        return _architecture_menu()
+        choices = (
+            ("CPU architecture / QEMU target", _architecture_menu()),
+            ("Documentation", _platform_documentation_menu()),
+        )
+        return _Menu("FastDyn targets", choices, lambda item: item)
     choices = (
         ("CPU architecture / QEMU target", _architecture_menu()),
         ("CMSIS-SVD device platform", svd_menu),
+        ("Documentation", _platform_documentation_menu()),
     )
-    return _Menu("FastDyn targets", choices, lambda menu: menu)
+    return _Menu("FastDyn targets", choices, lambda item: item)
+
+
+def _platform_documentation_menu() -> _Menu:
+    entries = (
+        DocumentationEntry("docs/PlatformBrowser.md", "Architecture and SVD platform discovery"),
+        DocumentationEntry("docs/Configuration.md", "Machine, memory, and CPU configuration reference"),
+        DocumentationEntry("docs/BuildingAConfig.md", "Build a configuration from configs/bare_bones.toml"),
+    )
+    choices = tuple((f"{entry.path}  —  {entry.description}", entry) for entry in entries)
+    return _Menu("FastDyn platforms  ›  documentation", choices, lambda entry: entry)
 
 
 class _InlinePicker:
@@ -323,9 +345,15 @@ class _InlinePicker:
                 selected = min(len(menu.choices) - 1, selected + 8)
 
 
-def browse_platforms(entries: Iterable[tuple[str, str, str]]) -> PlatformEntry | ArchitectureEntry | None:
-    """Browse in place, restoring the terminal when a target is chosen."""
-    menu = build_platform_browser(entries)
+Menu = _Menu
+
+
+def browse_menu(menu: Menu | None) -> object | None:
+    """Browse a small menu tree in place and return its selected leaf object.
+
+    Feature-specific browser modules build declarative ``Menu`` trees; this
+    shared renderer owns terminal mode, redraw, navigation, and cleanup.
+    """
     if menu is None:
         return None
     history: list[_Menu] = []
@@ -338,7 +366,13 @@ def browse_platforms(entries: Iterable[tuple[str, str, str]]) -> PlatformEntry |
                 menu = history.pop()
                 continue
             next_item = menu.advance(menu.choices[selected][1])
-            if isinstance(next_item, (PlatformEntry, ArchitectureEntry)):
+            if not isinstance(next_item, _Menu):
                 return next_item
             history.append(menu)
             menu = next_item
+
+
+def browse_platforms(entries: Iterable[tuple[str, str, str]]) -> PlatformEntry | ArchitectureEntry | DocumentationEntry | None:
+    """Browse in place, restoring the terminal when a target is chosen."""
+    selected = browse_menu(build_platform_browser(entries))
+    return selected if isinstance(selected, (PlatformEntry, ArchitectureEntry, DocumentationEntry)) else None

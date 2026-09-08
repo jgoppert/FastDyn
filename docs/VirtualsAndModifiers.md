@@ -104,6 +104,16 @@ the intent:
 The plugin's built-in registry currently provides the following names. They
 are case-sensitive.
 
+To browse the user-configurable virtual instructions and run-wide plugins from
+the terminal, including a ready-to-copy TOML example for each selection, run:
+
+```bash
+fastdyn help virtuals
+```
+
+`fastdyn help plugins` is an alias. Use `--no-browse` to print a
+script-friendly catalog. Browse modifier forms with `fastdyn help modifiers`.
+
 | Instruction | Arguments | Effect when its trigger PC executes |
 |---|---|---|
 | `raiseirq` | `<irq>` | Raise IRQ `<irq>` immediately. Example: `args = ["42"]`. |

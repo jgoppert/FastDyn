@@ -1,0 +1,38 @@
+# Start here: replace the firmware path and choose values with `fastdyn help`.
+# See docs/BuildingAConfig.md for a complete guided flow.
+
+[Machine]
+# Browse machine/QEMU settings with: fastdyn help machine
+# Copy a specific SVD platform from: fastdyn help platforms
+platform = "generic-cortexm"
+qemu_path = "qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn.qmp"
+log_options = "none"
+
+[Memory.main]
+# Browse primary and additional memory banks with: fastdyn help memory
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "1M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+# Copy a target preset from: fastdyn help platforms
+# Browse firmware and startup settings with: fastdyn help firmware
+arch = "arm"
+machine = "cortexm"
+cpu = "cortex-m4"
+binary = "firmware.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x0"
+
+# Add only the models and address ranges your firmware needs. Browse examples:
+# fastdyn help device-models
+[Device.Models]

@@ -67,8 +67,8 @@ To see valid architecture presets and the SVD-backed values accepted by
 `[Machine].platform`, use the CLI catalog:
 
 ```bash
-fastdyn platforms              # interactive browser in a terminal
-fastdyn platforms STM32
+fastdyn help platforms              # interactive browser in a terminal
+fastdyn help platforms STM32
 ```
 
 The browser first lets you choose a CPU architecture/QEMU target or a CMSIS-SVD
@@ -81,6 +81,14 @@ It redraws in place and disappears after a selection, then prints ready-to-copy
 CPU or `platform = "..."` TOML settings. The second command lists every
 matching platform value as plain text. Use `--no-browse` for the vendor summary
 in a terminal, or `--browse` to force the browser.
+
+For a guided path from the near-empty
+[`configs/bare_bones.toml`](../configs/bare_bones.toml) to a complete run,
+see [Building a FastDyn Configuration](BuildingAConfig.md).
+
+The same interactive help menu also provides essential run configuration
+fragments through `fastdyn help machine`, `fastdyn help memory`, and
+`fastdyn help firmware`.
 
 When `edge_coverage = true`, FastDyn also writes cumulative edge coverage to
 `edges.txt` alongside `bbl.txt` in the active work directory.

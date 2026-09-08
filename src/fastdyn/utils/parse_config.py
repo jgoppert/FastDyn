@@ -487,7 +487,7 @@ def resolve_svd(
     )
     raise SvdResolutionError(
         f"Could not resolve SVD for '{platform_or_board}' from '{svd_input}'."
-        f"{suggestion_text} Run `fastdyn platforms {platform_or_board}` to list "
+        f"{suggestion_text} Run `fastdyn help platforms {platform_or_board}` to list "
         "matching valid options, or pass --svd <file-or-directory> explicitly."
     )
 

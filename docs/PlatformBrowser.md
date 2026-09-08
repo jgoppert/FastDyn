@@ -1,15 +1,18 @@
 # Browsing platform identifiers
 
 `[Machine].platform` must match the filename stem of a CMSIS-SVD platform in
-the configured catalog. `fastdyn platforms` opens an inline terminal browser
+the configured catalog. `fastdyn help platforms` opens an inline terminal browser
 when it is run with no query in an interactive terminal:
 
 ```bash
-fastdyn platforms
+fastdyn help platforms
 ```
 
 Use `--browse` to force that browser, or `--no-browse` for plain text in a
 terminal. This keeps pipes and scripts non-interactive.
+
+Choose **Documentation** inside the platform browser to see the configuration
+and browser documentation relevant to that choice.
 
 The first menu provides two branches: **CPU architecture / QEMU target** and
 **CMSIS-SVD device platform**. The architecture branch lists the target presets
@@ -35,6 +38,6 @@ platform = "STM32H753x"
 Plain-text lookup remains useful for automation and quick family searches:
 
 ```bash
-fastdyn platforms STM32
-fastdyn platforms --no-browse
+fastdyn help platforms STM32
+fastdyn help platforms --no-browse
 ```
