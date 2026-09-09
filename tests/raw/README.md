@@ -11,6 +11,7 @@ start from a flat firmware image rather than an ELF.
 | `rtthread.bin` | `tests/binaries/rtos/rtthread.elf` | `0x60010000` |
 | `threadx.bin` | `tests/binaries/rtos/threadx.elf` | `0x00000000` |
 | `zephyr.bin` | `tests/binaries/rtos/zephyr.elf` | `0x00000000` |
+| `freertos_stm32f429i_discovery.bin` | `tests/binaries/freertos_stm32f429i_discovery/freertos_stm32f429i_discovery.elf` | `0x08000000` |
 
 Regenerate them from the repository root with:
 
@@ -19,6 +20,10 @@ for name in chibios nuttx rtthread threadx zephyr; do
   arm-none-eabi-objcopy -O binary "tests/binaries/rtos/${name}.elf" \
     "tests/raw/${name}.bin"
 done
+
+arm-none-eabi-objcopy -O binary \
+  tests/binaries/freertos_stm32f429i_discovery/freertos_stm32f429i_discovery.elf \
+  tests/raw/freertos_stm32f429i_discovery.bin
 ```
 
 Raw binaries intentionally discard ELF metadata: architecture, entry point,
