@@ -20,3 +20,6 @@
 [submodule "third_party/common/modelica_models"]
 	path = third_party/common/modelica_models
 	url = https://github.com/cognipilot/modelica_models.git
+[submodule "tools/raw2elf"]
+	path = tools/raw2elf
+	url = https://github.com/PSecLab/raw2elf.git

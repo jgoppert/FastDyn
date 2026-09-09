@@ -61,4 +61,6 @@ done
 
 grep -q 'Detected RTOS:FreeRTOS' "$smoke_dir/fastdyn.log"
 grep -q '"event":"task_switch"' "$smoke_dir/work/run-artifacts/introspection/activity.jsonl"
+grep -q '"task_name":"led"' "$smoke_dir/work/run-artifacts/introspection/activity.jsonl"
+grep -q '"task_name":"IDLE"' "$smoke_dir/work/run-artifacts/introspection/activity.jsonl"
 echo "STM32F429I-DISC1 FreeRTOS LED smoke test passed: ${values[*]}"
