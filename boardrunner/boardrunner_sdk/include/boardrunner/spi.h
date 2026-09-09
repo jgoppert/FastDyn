@@ -29,7 +29,14 @@ typedef struct {
 // --- End of struct definitions ---
 
 //SPI API functions definitions -- exposed to SPI Model writer
-SPIBus api_spi_init_bus(ConfigSection* model_info, const char* bus_name);             //takes the user configuration for attached slaves and creates a bus with slaves attached
+SPIBus api_spi_init_bus_impl(ConfigSection* model_info, const char* bus_name); //takes the user configuration for attached slaves and creates a bus with slaves attached
 uint32_t api_spi_transfer(SPIBus *bus, uint32_t val);           //transfer the data to all the slaves and calls spi_transfer_raw_default for each slave
 void api_spi_set_cs(SPIBus *bus, int cs_id, int level);
 //End of SPI API funcitons definitions
+
+/* Call as api_spi_init_bus(model_info) for a nameless bus, or
+ * api_spi_init_bus(model_info, "spi1") to select a specific one. */
+#define _SPI_INIT_BUS_SECOND(_1, _2, ...) _2
+#define api_spi_init_bus(model_info, ...) \
+    api_spi_init_bus_impl((model_info), \
+        _SPI_INIT_BUS_SECOND(_, ##__VA_ARGS__, NULL))
