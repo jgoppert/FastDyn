@@ -8,7 +8,8 @@
 //TODO: Currently, the path is hardcoded- update the apis
 
 //Returns the pseudo terminal handler
-int api_pty_fd_gen(const char* dev_name) {
+#undef api_pty_fd_gen
+int api_pty_fd_gen_impl(const char* dev_name) {
     char pty_path[256];
     if (dev_name && dev_name[0] != '\0') {
         snprintf(pty_path, sizeof(pty_path), "/tmp/%s_pty", dev_name);

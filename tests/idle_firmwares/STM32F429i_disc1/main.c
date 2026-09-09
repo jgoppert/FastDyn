@@ -314,6 +314,19 @@ __attribute__((naked)) void init_regs(void) {
         "b .\n\t"
     );
 }
+#ifdef TRAIN_TIMER
+int timer_test(void);
+#endif
+#ifdef TRAIN_GPIO
+int gpio_test(void);
+#endif
+#ifdef TRAIN_USART
+int usart_test(void);
+#endif
+#ifdef TRAIN_ADC_DMA
+int adc_dma_test(void);
+#endif
+
 int main() {
     #ifdef TRAIN_TIMER
 		timer_test();
@@ -323,6 +336,9 @@ int main() {
 #endif
 #ifdef TRAIN_USART
 		usart_test();
+#endif
+#ifdef TRAIN_ADC_DMA
+		adc_dma_test();
 #endif
 		// unsigned int * ram_baddr = 0x20020000;
 		// for (int i =0; i< 0x100; i++) {

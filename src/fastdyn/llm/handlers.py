@@ -1,4 +1,5 @@
 import os
+import re
 import glob
 import logging
 from fastdyn.llm.response_parser import (
@@ -39,12 +40,79 @@ def llm_history_next(history_dir: str) -> int:
     return max(nums) + 1 if nums else 1
 
 
+_CANONICAL_PATCH_MARKER = "<<<<<<< SEARCH"
+# Common ad-hoc patch shapes an LLM might invent on a retry, e.g.
+# "### SEARCH" / "### REPLACE" or "SEARCH:" / "REPLACE:" headings.
+_ADHOC_PATCH_PATTERN = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(SEARCH|REPLACE)\b\s*:?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_FENCED_C_BLOCK_PATTERN = re.compile(r"```[cC]\s*\n.*?```", re.DOTALL)
+
+
+def _count_c_fences(response_text):
+    return len(_FENCED_C_BLOCK_PATTERN.findall(response_text))
+
+
 def handle_initial_prompt(response_text, output_path, work_dir):
     """Process an initial prompt response: extract C code and write model file.
+
+    Also handles the case where a retry comes back as an incremental
+    SEARCH/REPLACE patch instead of a full-file rewrite. If canonical
+    ``<<<<<<< SEARCH`` markers are present, the response is applied as a
+    patch against ``output_path`` (preserving anything not covered by the
+    patch). If the response looks like a patch in some ad-hoc shape
+    (multiple partial fenced C blocks with SEARCH / REPLACE headings),
+    the write is refused so the previous file is not clobbered.
 
     Returns:
         Tuple of (success: bool, error_context: str).
     """
+    # Case 1: canonical SEARCH/REPLACE patch — delegate to the revised-prompt
+    # handler so patches apply against the existing file on disk.
+    if _CANONICAL_PATCH_MARKER in response_text:
+        log.info(
+            "Initial-prompt response contains SEARCH/REPLACE markers; "
+            "applying as a patch to %s instead of overwriting.",
+            output_path,
+        )
+        return handle_revised_prompt(response_text, [output_path], work_dir)
+
+    # Case 2: ad-hoc patch shape (headings like "### SEARCH" / "### REPLACE",
+    # or multiple partial C fences). Reject rather than concatenate — that
+    # was the failure mode that produced orphan switch blocks glued to a
+    # duplicated file body.
+    fence_count = _count_c_fences(response_text)
+    adhoc_hits = {m.group(1).upper() for m in _ADHOC_PATCH_PATTERN.finditer(response_text)}
+    looks_like_adhoc_patch = (
+        {"SEARCH", "REPLACE"}.issubset(adhoc_hits) or fence_count > 1
+    )
+    if looks_like_adhoc_patch:
+        log.error(
+            "Initial-prompt response looks like a patch (%d C fences, "
+            "ad-hoc markers=%s) but not in canonical SEARCH/REPLACE "
+            "format. Refusing to overwrite %s.",
+            fence_count, sorted(adhoc_hits), output_path,
+        )
+        error_context = (
+            "Your response looks like an incremental patch but is not in "
+            "the expected format for an initial prompt.\n"
+            "Either send the COMPLETE C device model in a single fenced "
+            "```c ... ``` code block, or use the canonical SEARCH/REPLACE "
+            "format:\n"
+            "// FILE: %s\n"
+            "<<<<<<< SEARCH\n"
+            "[exact old code]\n"
+            "=======\n"
+            "[new code]\n"
+            ">>>>>>> REPLACE\n"
+            "Do not use ``` \\`\\`\\`c ``` blocks with `### SEARCH` / "
+            "`### REPLACE` headings — the framework will not interpret them."
+            % os.path.basename(output_path)
+        )
+        return False, error_context
+
+    # Case 3: normal full-file rewrite.
     try:
         c_code = extract_c_code(response_text)
     except ParsingError as e:

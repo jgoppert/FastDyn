@@ -115,6 +115,7 @@ if ENABLE_LIBHW
     include_directories: libhw_inc,
     link_args: [
       '-L' + join_paths(LIBHW_DIR, 'out'),
+      '-Wl,-rpath,' + join_paths(LIBHW_DIR, 'out'),
       '-lhw',
       '-lstlink',
     ],
