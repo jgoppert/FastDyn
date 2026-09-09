@@ -25,6 +25,7 @@ from . import timing
 from .fuzzer import fuzzer
 from .utils import parse_config as parse_helper
 from . import platform_browser
+from .virtual_preprocessing import VirtualPreparationError
 from fastdyn.binary.symmap import SymbolResolver
 from fastdyn.binary.symmap.providers.dwarf import DwarfProvider
 import fastdyn.targets.qemu_target as qemu_target
@@ -475,7 +476,7 @@ def run(config, map_file, work_dir, svd, persist_work_dir, fmu, no_build_fmu,
     try:
         # Do this before _prepare_work_dir can replace an existing directory.
         runtime_config.validate_config(config)
-    except runtime_config.RuntimeConfigError as exc:
+    except (runtime_config.RuntimeConfigError, VirtualPreparationError) as exc:
         raise click.ClickException(str(exc)) from exc
     work_dir = _prepare_work_dir(work_dir, persist_work_dir)
     _configure_measurement(config, work_dir)
@@ -513,7 +514,7 @@ def run(config, map_file, work_dir, svd, persist_work_dir, fmu, no_build_fmu,
                     if process_manager is not None:
                         process_manager.stop_terminator_watcher()
                         process_manager.raise_for_terminator_failure()
-    except runtime_config.RuntimeConfigError as exc:
+    except (runtime_config.RuntimeConfigError, VirtualPreparationError) as exc:
         raise click.ClickException(str(exc)) from exc
 
 

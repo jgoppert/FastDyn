@@ -73,13 +73,30 @@ class FunctionCounterRunPreprocessor:
                 f"[CPU.cpu0.plugins.function_counter].max_functions must be 1..{MAX_FUNCTIONS}"
             )
 
+        entries = _function_entries(ctx)
         selected = [
-            (address, name) for address, name in _function_entries(ctx)
+            (address, name) for address, name in entries
             if (not include or any(fnmatchcase(name, pattern) for pattern in include))
             and not any(fnmatchcase(name, pattern) for pattern in exclude)
         ]
         if not selected:
-            raise VirtualPreparationError("function_counter selected no executable ELF functions")
+            if not entries:
+                raise VirtualPreparationError(
+                    f"function_counter found no executable ELF function symbols in {ctx.binary}. "
+                    "Use an ELF with a symbol table, or choose another plugin for a raw binary."
+                )
+            examples = ", ".join(repr(name) for _address, name in entries[:8])
+            filters = []
+            if include:
+                filters.append(f"include={list(include)!r}")
+            if exclude:
+                filters.append(f"exclude={list(exclude)!r}")
+            raise VirtualPreparationError(
+                f"function_counter matched no executable functions in {ctx.binary} "
+                f"with {', '.join(filters) or 'the configured filters'}. "
+                f"Try a matching glob such as one of: {examples}; "
+                "or remove include to count all executable functions."
+            )
         invalid_names = [
             name for _address, name in selected
             if any(character.isspace() for character in name) or len(name.encode("utf-8")) >= 256

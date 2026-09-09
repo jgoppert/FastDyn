@@ -169,6 +169,23 @@ def test_function_counter_plugin_generates_one_entry_virtual_per_elf_function(tm
     assert "z_arm_pendsv" in manifest.read_text(encoding="utf-8")
 
 
+def test_function_counter_reports_unmatched_function_filters_with_examples(tmp_path):
+    cpu = _Cpu(plugin_config={"function_counter": {"enabled": True, "include": ["main"]}})
+    cpu.binary = str(
+        Path("tests/binaries/freertos_stm32f429i_discovery/freertos_stm32f429i_discovery.elf").resolve()
+    )
+    machine = _Machine(cpu)
+
+    with pytest.raises(VirtualPreparationError) as error:
+        prepare_run_preprocessors(machine, tmp_path)
+
+    message = str(error.value)
+    assert "matched no executable functions" in message
+    assert "include=['main']" in message
+    assert "Reset_Handler" in message
+    assert "remove include" in message
+
+
 def test_function_tracer_generates_dwarf_argument_schema_for_structures(tmp_path):
     cpu = _Cpu(
         plugin_config={
