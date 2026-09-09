@@ -102,3 +102,17 @@ tests/integration/run_nuttx_introspection_smoke.sh
 The NuttX script also bootstraps its upstream build-only utilities
 (`kconfig-frontends` and `genromfs`) in the temporary directory, and creates
 a temporary Python environment for NuttX's ELF post-processing dependencies.
+
+## STM32F429I-DISC1 FreeRTOS LED smoke test
+
+`run_freertos_stm32f429i_led_smoke.sh` builds the dedicated Cortex-M4F fixture
+against the real FreeRTOS Kernel, launches it through FastDyn, and reads two
+task-owned counters through QMP. Both must advance: they represent the green
+and red user LEDs on PG13--PG14 at 250/500 ms.
+
+```bash
+tests/integration/run_freertos_stm32f429i_led_smoke.sh
+```
+
+The fixture and its matching config are documented in
+[`tests/firmwares/freertos_stm32f429i_discovery/`](../firmwares/freertos_stm32f429i_discovery/).

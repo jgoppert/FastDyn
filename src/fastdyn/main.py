@@ -472,6 +472,11 @@ def run_help(browse):
 )
 def run(config, map_file, work_dir, svd, persist_work_dir, fmu, no_build_fmu,
         no_run_processes):
+    try:
+        # Do this before _prepare_work_dir can replace an existing directory.
+        runtime_config.validate_config(config)
+    except runtime_config.RuntimeConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
     work_dir = _prepare_work_dir(work_dir, persist_work_dir)
     _configure_measurement(config, work_dir)
 

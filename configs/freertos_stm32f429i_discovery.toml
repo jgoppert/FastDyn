@@ -1,0 +1,42 @@
+# Build first: tests/firmwares/freertos_stm32f429i_discovery/build.sh
+
+[Machine]
+platform = "STM32F429"
+qemu_path = "qemu/build/qemu-system-arm"
+display = "none"
+serial = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-freertos-stm32f429i-leds.qmp"
+log_options = "none"
+reset_memory_files = true
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "192K"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-freertos-stm32f429i-leds.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "cortexm"
+cpu = "cortex-m4"
+binary = "tests/binaries/freertos_stm32f429i_discovery/freertos_stm32f429i_discovery.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x08000000"
+
+[CPU.cpu0.plugins.introspection]
+enabled = true
+
+[Device.Models.classic]
+
+[Device.unmapped_peripherals]
+ranges = [["0x40000000", "0x5fffffff"]]
+description = "STM32F429 peripheral window handled by FastDyn's classic model."
+
+[[Device.unmapped_peripherals.handlers]]
+model = "classic"
+enabled = true

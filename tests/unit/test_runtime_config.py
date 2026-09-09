@@ -1,11 +1,32 @@
 from pathlib import Path
 
+import pytest
+
 from fastdyn import runtime_config
 
 
 def write_config(path: Path, body: str) -> Path:
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def test_reports_duplicate_toml_keys_with_location_table_and_correction(tmp_path):
+    config = write_config(
+        tmp_path / "fastdyn.toml",
+        """[Machine]
+monitor_port = 0
+enable_gdb = true
+monitor_port = 1234
+""",
+    )
+
+    with pytest.raises(runtime_config.RuntimeConfigError) as error:
+        runtime_config.validate_config(config)
+
+    message = str(error.value)
+    assert f"{config}:4:" in message
+    assert "duplicate key 'monitor_port' in [Machine]" in message
+    assert "remove the duplicate or edit the original setting" in message
 
 
 def test_loads_named_run_processes(tmp_path):

@@ -39,6 +39,40 @@ class RuntimeConfigError(RuntimeError):
 _ENV_PATTERN = re.compile(
     r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}"
 )
+_TOML_LOCATION_PATTERN = re.compile(r"\(at line (?P<line>\d+), column (?P<column>\d+)\)")
+_TOML_TABLE_PATTERN = re.compile(r"^\s*(?P<table>\[\[?[^\]]+\]?\])\s*(?:#.*)?$")
+
+
+def _format_toml_error(path: Path, error: tomllib.TOMLDecodeError) -> str:
+    """Turn parser-only TOML failures into a correction-oriented diagnostic."""
+    parser_message = str(error)
+    location = _TOML_LOCATION_PATTERN.search(parser_message)
+    if location is None:
+        return f"Invalid TOML configuration in {path}: {parser_message}"
+
+    line_number = int(location.group("line"))
+    column_number = int(location.group("column"))
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    line = lines[line_number - 1] if line_number <= len(lines) else ""
+
+    table = ""
+    for previous in reversed(lines[:line_number - 1]):
+        match = _TOML_TABLE_PATTERN.match(previous)
+        if match:
+            table = f" in {match.group('table')}"
+            break
+
+    if "Cannot overwrite a value" in parser_message:
+        key = line.partition("=")[0].strip() or "this key"
+        return (
+            f"Invalid TOML configuration: {path}:{line_number}:{column_number}: "
+            f"duplicate key {key!r}{table}. TOML keys may be defined only once; "
+            "remove the duplicate or edit the original setting."
+        )
+    return f"Invalid TOML configuration: {path}:{line_number}:{column_number}: {parser_message}"
 
 
 def expand_env_defaults(value: str, env: dict[str, str] | None = None) -> str:
@@ -130,9 +164,16 @@ def _load_toml(path: Path) -> dict[str, object]:
             data = tomllib.load(handle)
     except FileNotFoundError as exc:
         raise RuntimeConfigError(f"Runtime config not found: {path}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise RuntimeConfigError(_format_toml_error(path, exc)) from exc
     if not isinstance(data, dict):
         raise RuntimeConfigError(f"Runtime config must contain TOML tables: {path}")
     return data
+
+
+def validate_config(config_path: str | Path) -> None:
+    """Validate TOML syntax before a command changes its work directory."""
+    _load_toml(Path(config_path).expanduser().resolve())
 
 
 def _as_table(value: object, label: str) -> dict[str, object]:

@@ -21,8 +21,11 @@ from typing import Iterable
 from elftools.elf.constants import P_FLAGS
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
+from fastdyn.utils import parse_config
 
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_BUILTIN_SVD_CATALOG = _REPOSITORY_ROOT / "third_party" / "common" / "cmsis-svd-data"
 _RAM_RANGES = (
     (0x20000000, 0x40000000),  # ARM Cortex-M SRAM and common aliases
     (0x80000000, 0xC0000000),  # common RISC-V RAM mappings
@@ -37,18 +40,6 @@ _RTOS_SYMBOLS = {
     "ThreadX": ("tx_kernel_enter", "_tx_thread_current_ptr"),
     "RT-Thread": ("rt_thread_startup", "rt_current_thread"),
 }
-_PLATFORM_NAMES = {
-    "STM32F303": "STM32F303",
-    "STM32F405": "STM32F405",
-    "STM32F407": "STM32F407",
-    "STM32F427": "STM32F427",
-    "STM32F429": "STM32F429",
-    "STM32F767": "STM32F767",
-    "STM32H743": "STM32H743",
-    "STM32H757": "STM32H757",
-}
-
-
 @dataclass(frozen=True)
 class LoadSegment:
     """One ELF PT_LOAD range expressed in target addresses."""
@@ -99,6 +90,16 @@ class ElfFacts:
     has_dwarf: bool
 
 
+@dataclass(frozen=True)
+class SvdSelection:
+    """A platform resolved with FastDyn's normal CMSIS-SVD resolver."""
+
+    platform: str
+    svd_file: Path
+    catalog: Path
+    uses_builtin_catalog: bool
+
+
 def _q(value: str) -> str:
     return json.dumps(value)
 
@@ -121,18 +122,18 @@ def _size(value: int) -> str:
 
 def _target_for(machine: str, elf_class: int) -> Target:
     targets = {
-        "EM_ARM": Target("arm", "cortexm", "cortex-m4", "generic-cortexm", "qemu-system-arm", "SRAM"),
-        "EM_AARCH64": Target("aarch64", "virt", "cortex-a53", "generic-aarch64", "qemu-system-aarch64", "DRAM"),
+        "EM_ARM": Target("arm", "cortexm", "cortex-m4", "generic-cortexm", "../qemu/build/qemu-system-arm", "SRAM"),
+        "EM_AARCH64": Target("aarch64", "virt", "cortex-a53", "generic-aarch64", "../qemu/build/qemu-system-aarch64", "DRAM"),
         "EM_RISCV": Target(
             "riscv64" if elf_class == 64 else "riscv32",
             "virt",
             "rv64" if elf_class == 64 else "rv32",
             "RISCV",
-            "qemu-system-riscv64" if elf_class == 64 else "qemu-system-riscv32",
+            "../qemu/build/qemu-system-riscv64" if elf_class == 64 else "../qemu/build/qemu-system-riscv32",
             "DRAM",
         ),
-        "EM_X86_64": Target("x86_64", "base_generic", "qemu64", "Intel", "qemu-system-x86_64", "DRAM"),
-        "EM_386": Target("i386", "base_generic", "qemu32", "Intel", "qemu-system-i386", "DRAM"),
+        "EM_X86_64": Target("x86_64", "base_generic", "qemu64", "Intel", "../qemu/build/qemu-system-x86_64", "DRAM"),
+        "EM_386": Target("i386", "base_generic", "qemu32", "Intel", "../qemu/build/qemu-system-i386", "DRAM"),
     }
     try:
         return targets[machine]
@@ -254,22 +255,58 @@ def _detect_rtos(symbols: set[str]) -> str | None:
     return best_name if best_score else None
 
 
-def _detect_platform(elf: ELFFile, symbols: set[str]) -> str | None:
+def _detect_platform(elf: ELFFile, symbols: set[str], platform_names: Iterable[str]) -> str | None:
+    """Recognize exact platform names using the selected CMSIS-SVD catalog."""
     haystack = "\n".join(symbols)
     for section_name in (".rodata", ".comment"):
         section = elf.get_section_by_name(section_name)
         if section is not None:
             haystack += "\n" + section.data().decode("latin-1", errors="ignore")
     upper = haystack.upper()
-    for marker, platform in _PLATFORM_NAMES.items():
-        if marker in upper:
+    # Prefer the most-specific filename when one platform is a prefix of
+    # another. The candidates are FastDyn's SVD catalog, not a second list.
+    for platform in sorted(set(platform_names), key=lambda name: (-len(name), name.casefold())):
+        if platform.upper() in upper:
             return platform
     return None
 
 
-def inspect_elf(path: str | Path) -> ElfFacts:
+def _catalog_path(svd_path: str | Path | None) -> Path:
+    """Use FastDyn's bundled catalog unless the caller explicitly overrides it."""
+    return Path(svd_path).expanduser().resolve() if svd_path else _BUILTIN_SVD_CATALOG
+
+
+def _catalog_platform_names(catalog: Path) -> tuple[str, ...]:
+    try:
+        return tuple(platform for _vendor, platform, _path in parse_config.list_svd_platforms(str(catalog)))
+    except parse_config.SvdResolutionError as exc:
+        raise ValueError(f"cannot read CMSIS-SVD catalog {catalog}: {exc}") from exc
+
+
+def resolve_platform(platform: str, svd_path: str | Path | None = None) -> SvdSelection:
+    """Validate and canonicalize a FastDyn ``[Machine].platform`` value."""
+    catalog = _catalog_path(svd_path)
+    try:
+        svd_file, canonical_name = parse_config.resolve_svd(
+            platform,
+            svd=str(catalog),
+            default_dir=None,
+            auto_discover=False,
+        )
+    except parse_config.SvdResolutionError as exc:
+        raise ValueError(str(exc)) from exc
+    return SvdSelection(
+        platform=canonical_name,
+        svd_file=Path(svd_file),
+        catalog=catalog,
+        uses_builtin_catalog=svd_path is None,
+    )
+
+
+def inspect_elf(path: str | Path, svd_path: str | Path | None = None) -> ElfFacts:
     """Inspect *path* and return only directly recoverable configuration facts."""
     elf_path = Path(path)
+    platform_names = _catalog_platform_names(_catalog_path(svd_path))
     with elf_path.open("rb") as stream:
         elf = ELFFile(stream)
         machine = str(elf.header["e_machine"])
@@ -296,7 +333,7 @@ def inspect_elf(path: str | Path) -> ElfFacts:
             cpu_attribute=attribute,
             cpu_note=cpu_note,
             rtos=_detect_rtos(symbols),
-            platform=_detect_platform(elf, symbols),
+            platform=_detect_platform(elf, symbols, platform_names),
             has_dwarf=elf.has_dwarf_info(),
         )
     return facts
@@ -321,10 +358,15 @@ def _memory_span(facts: ElfFacts) -> tuple[int, int, str]:
     return 0x80000000, 128 * 1024 * 1024, "no writable PT_LOAD segment; used the generic QEMU RAM default"
 
 
-def render_config(facts: ElfFacts, binary_path: str | None = None, plugin_library: str = "build/libfastdyn.so") -> str:
+def render_config(
+    facts: ElfFacts,
+    binary_path: str | None = None,
+    plugin_library: str = "build/libfastdyn.so",
+    platform_selection: SvdSelection | None = None,
+) -> str:
     """Render a complete, reviewable FastDyn TOML starter configuration."""
     target = facts.target
-    platform = facts.platform or target.platform
+    platform = platform_selection.platform if platform_selection else facts.platform or target.platform
     base, memory_size, memory_reason = _memory_span(facts)
     lines = [
         "# Generated by tools/elf2config/elf_to_config.py. Review every inferred value before running.",
@@ -335,8 +377,16 @@ def render_config(facts: ElfFacts, binary_path: str | None = None, plugin_librar
         lines.append(f"# ARM ABI CPU attribute: {facts.cpu_attribute!r}.")
     if facts.cpu_note:
         lines.append(f"# Review CPU: {facts.cpu_note}.")
-    if facts.platform:
-        lines.append(f"# Platform inferred from ELF strings/symbols: {facts.platform}.")
+    if platform_selection:
+        catalog_kind = "FastDyn's bundled CMSIS-SVD catalog" if platform_selection.uses_builtin_catalog else "the supplied CMSIS-SVD path"
+        lines.append(
+            f"# Platform selected from {catalog_kind}: {platform_selection.platform} "
+            f"({platform_selection.svd_file})."
+        )
+        if not platform_selection.uses_builtin_catalog:
+            lines.append(f"# Run FastDyn with: -s {_q(str(platform_selection.catalog))}")
+    elif facts.platform:
+        lines.append(f"# Platform inferred from the CMSIS-SVD catalog: {facts.platform}.")
     else:
         lines.append("# No exact board/MCU was found; generic platform selected. Use `fastdyn help platforms` to refine it.")
     if facts.rtos:
@@ -408,6 +458,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("elf", type=Path, help="firmware ELF to inspect")
     parser.add_argument("-o", "--output", type=Path, help="write TOML here instead of stdout")
+    parser.add_argument(
+        "--platform", metavar="PLATFORM",
+        help="exact FastDyn [Machine].platform value; validated against the CMSIS-SVD catalog",
+    )
+    parser.add_argument(
+        "-s", "--svd", type=Path, metavar="PATH",
+        help="custom CMSIS-SVD file or catalog directory (default: FastDyn's bundled catalog)",
+    )
     parser.add_argument("--plugin-library", default="build/libfastdyn.so", help="FastDyn runtime library path")
     parser.add_argument("--force", action="store_true", help="allow replacing an existing --output file")
     return parser.parse_args(argv)
@@ -422,11 +480,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: output exists: {args.output} (use --force to replace it)", file=sys.stderr)
         return 2
     try:
-        facts = inspect_elf(args.elf)
+        facts = inspect_elf(args.elf, svd_path=args.svd)
+        requested_platform = args.platform or facts.platform
+        selection = resolve_platform(requested_platform, args.svd) if requested_platform else None
     except (OSError, ValueError) as exc:
         print(f"error: cannot inspect {args.elf}: {exc}", file=sys.stderr)
         return 2
-    rendered = render_config(facts, binary_path=str(args.elf), plugin_library=args.plugin_library)
+    rendered = render_config(
+        facts,
+        binary_path=str(args.elf),
+        plugin_library=args.plugin_library,
+        platform_selection=selection,
+    )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
