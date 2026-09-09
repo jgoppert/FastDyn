@@ -116,7 +116,12 @@ static bool install_point(const struct SchemaFlowPoint *point, const char *name)
         return true;
     }
     callback = lookup_callback(name);
-    return callback != NULL && core_register_virtual_rule(point->at, callback, "");
+    /* fuzz_sync_point uses non-NULL callback userdata as its activation
+     * guard.  Schema-owned rules need a stable, nonempty marker just like
+     * rules parsed from a virtuals file; an empty argument is normalized to
+     * NULL by QEMU's plugin dispatcher and otherwise drops the first input. */
+    return callback != NULL &&
+           core_register_virtual_rule(point->at, callback, "schema-flow");
 }
 
 bool schema_flow_install(const struct SchemaFlow *flow)

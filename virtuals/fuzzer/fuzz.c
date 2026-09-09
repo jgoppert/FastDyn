@@ -858,20 +858,21 @@ static void fuzz_snap_point(unsigned int cpu_index, void *udata)
         fuzz_sync_point(cpu_index, udata);
     }
 
-    if (g_fuzz_snap_callback) {
-        g_fuzz_snap_callback();
-    }
 }
 
 static void fuzz_sync_point(unsigned int cpu_index, void *udata)
 {
+    /* A virtual rule's userdata is optional.  Schema-owned flow rules are
+     * registered at runtime, and QEMU may normalize an empty argument string
+     * to NULL.  Reaching the registered sync point is the activation signal. */
+    (void)udata;
+
     if (!fuzz_snap_initialized) {
         return;
     }
     if (!coverage) {
         utils_die("[fuzz_sync] Coverage not enabled, cannot assert coverage data");
     }
-    if (!udata) return;
 
     static bool clear_next = false;
 
@@ -879,7 +880,9 @@ static void fuzz_sync_point(unsigned int cpu_index, void *udata)
 
     fuzz_sync_coverage();
 
-    fuzz_dump_bbl();
+    /* Restoring a snapshot can leave the inline IRQ tracker at a stale depth.
+     * Start each new input at thread level so coverage remains observable. */
+    fuzz_irq_depth = 0;
 
     if (g_fuzz_sync_callback) {
         g_fuzz_sync_callback();
@@ -889,8 +892,7 @@ static void fuzz_sync_point(unsigned int cpu_index, void *udata)
     while (true) {
         if (oldState == FUZZ_MSG_READY) {
             fuzz_set_message_state(oldState); // reactivate the message
-            printf("Goodbye2\n");
-            return;
+            break;
         }
 
         fuzz_backend_msg_t msg = {0};
@@ -919,6 +921,13 @@ static void fuzz_sync_point(unsigned int cpu_index, void *udata)
             fuzz_activate_message(&msg);
             break;
         }
+    }
+
+    /* Inject only after the message is active.  A restored guest can revisit
+     * the snap address, so injecting from fuzz_snap_point would consume the
+     * same message at the wrong lifecycle point. */
+    if (g_fuzz_snap_callback) {
+        g_fuzz_snap_callback();
     }
 }
 

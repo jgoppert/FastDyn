@@ -5,12 +5,13 @@ machine TOML configuration supplies its path through the `fuzzing_schema`
 setting. The schema is parsed before execution rules are installed; malformed
 or unsupported input fails schema loading rather than being partially applied.
 
-The schema has five independent top-level sections:
+An example demonstrating as many use cases as possible can be seen in `SCHEMA.json`
+
+The schema has four independent top-level sections:
 
 ```json
 {
   "flow": { "...": "..." },
-  "post_snapshot_modifiers": [ "..." ],
   "fields": [ "..." ],
   "streams": [ "..." ],
   "hooks": [ "..." ]
@@ -67,23 +68,6 @@ per-input state. `sync` ends processing for the current input and its required
 `resume` address is written to the program counter before the next iteration.
 
 Flow and hook addresses must all be distinct.
-
-## `post_snapshot_modifiers`
-
-`post_snapshot_modifiers` is optional and requires `flow`. Each entry has an
-instruction address and a normal FastDyn modifier patch:
-
-```json
-"post_snapshot_modifiers": [
-  { "at": "0x08151674", "patch": "r15 0x08151678" }
-]
-```
-
-These modifiers are installed before guest translation, but their generated
-code is gated by a host-side flag. The flag is enabled immediately after the
-first `flow.snap` restore, so the same translated blocks apply the patch on
-fuzzing iterations but not while establishing the snapshot. `at` accepts the
-same unsigned number or decimal/`0x`-prefixed string forms as flow addresses.
 
 ## Top-level `fields`
 
@@ -265,6 +249,19 @@ per visit by default; set `chunk_size` to emit a larger chunk:
 `inject` hook. `chunk_size` is optional, defaults to `1`, and must be a
 positive integer no greater than `INT_MAX`. A hook writes the next chunk to the
 location; after the stream's data is exhausted, the remaining bytes are zero.
+
+An optional `eof_value` changes that exhausted-stream behavior for a register
+destination: instead of zero-padding the next hook visit, FastDyn writes the
+specified signed-32-bit or unsigned-32-bit value to the entire register. It
+does not add that sentinel to the stream's emitted-byte history. This models
+byte-at-a-time APIs that report an empty queue with a wider return value:
+
+```json
+{ "name": "serial_read", "location": "reg(0)", "eof_value": -1 }
+```
+
+The option applies to both raw and finite streams. It is intentionally a
+register-return policy; memory streams retain their byte-oriented zero padding.
 
 For memory destinations, the chunk is written contiguously from the resolved
 address. For `reg(N)` destinations, up to the first four bytes are packed

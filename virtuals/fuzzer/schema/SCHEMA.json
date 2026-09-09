@@ -1,0 +1,216 @@
+{
+  "flow": {
+    "snap": {
+      "at": "0x08000010"
+    },
+    "sync": {
+      "at": "0x08000030",
+      "resume": "0x08000010"
+    }
+  },
+  "fields": [
+    {
+      "name": "snap_uint_fuzzed",
+      "location": "reg(0)",
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "snap_float_fuzzed",
+      "location": "r4 + 0x10",
+      "type": "float",
+      "size": 4
+    },
+    {
+      "name": "snap_data_fuzzed",
+      "location": "[[r5 + 4] + 8]",
+      "type": "data",
+      "size": 8
+    },
+    {
+      "name": "hooked_int_fuzzed",
+      "location": "u16[r2 + 4] + 0x20",
+      "type": "int",
+      "size": 2
+    },
+    {
+      "name": "constant_uint",
+      "location": "0x20000000",
+      "type": "uint",
+      "size": 4,
+      "options": {
+        "constant": 305419896
+      }
+    },
+    {
+      "name": "constant_int",
+      "location": "0x20000004",
+      "type": "int",
+      "size": 4,
+      "options": {
+        "constant": -42
+      }
+    },
+    {
+      "name": "constant_float",
+      "location": "0x20000008",
+      "type": "float",
+      "size": 2,
+      "options": {
+        "constant": 1.5
+      }
+    },
+    {
+      "name": "constant_data",
+      "location": "0x20000010",
+      "type": "data",
+      "size": 4,
+      "options": {
+        "constant": [222, 173, 190, 239]
+      }
+    },
+    {
+      "name": "reused_direct_data",
+      "location": "r6 + (4 * 8) / 2 - 1",
+      "type": "data",
+      "size": 4
+    },
+    {
+      "name": "frame_prefix",
+      "type": "data",
+      "size": 2,
+      "options": {
+        "constant": [165, 90]
+      }
+    },
+    {
+      "name": "framed_payload",
+      "type": "data",
+      "size": 16
+    },
+    {
+      "name": "framed_length_le_computed",
+      "type": "length",
+      "size": 2,
+      "options": {
+        "fields": ["reused_direct_data", "framed_payload"],
+        "byte_order": "little"
+      }
+    },
+    {
+      "name": "framed_length_be_partially_fuzzed",
+      "type": "length",
+      "size": 2,
+      "options": {
+        "fields": ["framed_payload"],
+        "byte_order": "big",
+        "fuzzable": true
+      }
+    },
+    {
+      "name": "frame_crc_modbus_le",
+      "type": "checksum",
+      "size": 2,
+      "options": {
+        "algorithm": "crc16-modbus",
+        "over": ["framed_uart"],
+        "byte_order": "little"
+      }
+    },
+    {
+      "name": "serial_byte_value",
+      "type": "uint",
+      "size": 1
+    },
+    {
+      "name": "finite_blob_data",
+      "type": "data",
+      "size": 6
+    },
+    {
+      "name": "finite_stream_length_be",
+      "location": "0x20000020",
+      "type": "length",
+      "size": 2,
+      "options": {
+        "fields": ["finite_blob"],
+        "byte_order": "big"
+      }
+    },
+    {
+      "name": "field_crc_mcrf4xx_be",
+      "location": "reg(3)",
+      "type": "checksum",
+      "size": 2,
+      "options": {
+        "algorithm": "crc16-mcrf4xx",
+        "over": ["constant_data", "framed_payload"],
+        "byte_order": "big"
+      }
+    }
+  ],
+  "streams": [
+    {
+      "name": "framed_uart",
+      "location": "r1 + 0x10",
+      "chunk_size": 4,
+      "fields": [
+        "frame_prefix",
+        "framed_length_le_computed",
+        "framed_length_be_partially_fuzzed",
+        "reused_direct_data",
+        "framed_payload",
+        "frame_crc_modbus_le"
+      ]
+    },
+    {
+      "name": "serial_byte",
+      "location": "reg(0)",
+      "eof_value": -1,
+      "fields": ["serial_byte_value"]
+    },
+    {
+      "name": "finite_blob",
+      "location": "r7 + 0x40",
+      "chunk_size": 2,
+      "fields": ["finite_blob_data"]
+    },
+    {
+      "name": "unbounded_memory",
+      "location": "r1",
+      "chunk_size": 8
+    }
+  ],
+  "hooks": [
+    {
+      "at": 134217984,
+      "fields": [
+        "hooked_int_fuzzed",
+        "constant_uint",
+        "constant_int",
+        "constant_float",
+        "constant_data"
+      ]
+    },
+    {
+      "at": "0x08000110",
+      "fields": ["framed_uart"]
+    },
+    {
+      "at": "0x08000120",
+      "fields": ["serial_byte"]
+    },
+    {
+      "at": "0x08000130",
+      "fields": ["finite_blob"]
+    },
+    {
+      "at": "0x08000140",
+      "fields": ["unbounded_memory"]
+    },
+    {
+      "at": "0x08000150",
+      "fields": ["field_crc_mcrf4xx_be"]
+    }
+  ]
+}

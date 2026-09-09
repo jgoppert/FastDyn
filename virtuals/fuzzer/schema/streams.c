@@ -12,6 +12,7 @@ enum StreamProperty {
     StreamLocation = 1U << 1,
     StreamFields = 1U << 2,
     StreamChunkSize = 1U << 3,
+    StreamEofValue = 1U << 4,
     StreamProperties = StreamName | StreamLocation,
 };
 
@@ -76,6 +77,23 @@ static bool parse_chunk_size(const cJSON *json, struct Stream *stream)
         return false;
     }
     stream->chunk_size = (size_t)value;
+    return true;
+}
+
+static bool parse_eof_value(const cJSON *json, struct Stream *stream)
+{
+    double value;
+
+    if (!cJSON_IsNumber(json) || stream == NULL) {
+        return false;
+    }
+    value = json->valuedouble;
+    if (value < (double)INT32_MIN || value > (double)UINT32_MAX ||
+        value != (double)(int64_t)value) {
+        return false;
+    }
+    stream->eof_value = (uint32_t)(int64_t)value;
+    stream->has_eof_value = true;
     return true;
 }
 
@@ -152,7 +170,8 @@ bool schema_streams_parse(const cJSON *json, struct Stream ***streams,
             property = strcmp(value->string, "name") == 0 ? StreamName :
                        strcmp(value->string, "location") == 0 ? StreamLocation :
                        strcmp(value->string, "fields") == 0 ? StreamFields :
-                       strcmp(value->string, "chunk_size") == 0 ? StreamChunkSize : 0;
+                       strcmp(value->string, "chunk_size") == 0 ? StreamChunkSize :
+                       strcmp(value->string, "eof_value") == 0 ? StreamEofValue : 0;
             if (property == 0 || (properties & property) != 0) {
                 goto fail;
             }
@@ -162,6 +181,10 @@ bool schema_streams_parse(const cJSON *json, struct Stream ***streams,
                 }
             } else if (property == StreamChunkSize) {
                 if (!parse_chunk_size(value, stream)) {
+                    goto fail;
+                }
+            } else if (property == StreamEofValue) {
+                if (!parse_eof_value(value, stream)) {
                     goto fail;
                 }
             } else {
@@ -309,8 +332,7 @@ static bool stream_field_next(struct Stream *stream, uint8_t *value)
         stream->field_index++;
         stream->field_offset = 0;
     }
-    *value = 0;
-    return true;
+    return false;
 }
 
 void schema_stream_write_next(struct Stream *stream)
@@ -336,15 +358,27 @@ void schema_stream_write_next(struct Stream *stream)
     stream->location = location;
     stream->location_resolved = true;
     for (i = 0; i < stream->chunk_size; i++) {
+        bool available = false;
+
         if (stream->field_count != 0) {
-            if (!stream_field_next(stream, &values[i])) {
+            available = stream_field_next(stream, &values[i]);
+            if (!available && stream->has_eof_value && i == 0 &&
+                location.type == Register) {
                 free(values);
+                fuzz_set_register(stream->eof_value, location.val.reg);
                 return;
             }
-            stream->cursor++;
         } else if (stream_input_offset <= input_size &&
                    stream_input_cursor < input_size - stream_input_offset) {
             values[i] = input[stream_input_offset + stream_input_cursor++];
+            available = true;
+        } else if (stream->has_eof_value && i == 0 &&
+                   location.type == Register) {
+            free(values);
+            fuzz_set_register(stream->eof_value, location.val.reg);
+            return;
+        }
+        if (available) {
             stream->cursor++;
         }
         if (!append_emitted(stream, values[i])) {

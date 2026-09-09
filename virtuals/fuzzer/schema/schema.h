@@ -66,6 +66,11 @@ struct Stream {
     size_t hook_index;
     size_t cursor;
     size_t chunk_size;
+    /* Optional value written to a register destination after no more stream
+     * bytes are available. This permits byte-oriented receive APIs whose
+     * normal empty indication is wider than one byte, such as -1. */
+    bool has_eof_value;
+    uint32_t eof_value;
 
     /* Optional finite sequence of top-level field definitions. Without
      * fields, a stream retains its unbounded raw-byte behavior. Each hook

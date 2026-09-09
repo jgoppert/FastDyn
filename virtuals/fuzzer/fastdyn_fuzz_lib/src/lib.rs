@@ -14,7 +14,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bincode;
 use core::num::NonZeroUsize;
 #[cfg(feature = "tui")]
 use libafl::monitors::tui::TuiMonitor;
@@ -40,7 +39,6 @@ use libafl::{
     BloomInputFilter, StdFuzzerBuilder,
 };
 use libafl_bolts::{current_nanos, rands::StdRand, tuples::tuple_list, AsSlice};
-use serde::ser;
 
 static STOP_FLAG: AtomicBool = AtomicBool::new(false);
 static ASSERT_STATUS: AtomicU32 = AtomicU32::new(ASSERT_NONE);
@@ -60,8 +58,6 @@ lazy_static::lazy_static! {
 const MAP_SIZE: usize = 65536; // same as AFL, make sure the definition of this size in C is the same
 #[no_mangle]
 pub static mut CVG: [u8; MAP_SIZE] = [0; MAP_SIZE];
-
-static STATE_PATH: &str = "fastdyn_work/state.bin";
 
 const ASSERT_NONE: u32 = 0;
 const ASSERT_RECOVERABLE: u32 = 1;
@@ -114,7 +110,7 @@ fn clear_input() {
 
 fn wait_until_complete(epoch: u64) -> Result<(), ()> {
     const SPIN_ITERS: usize = 10_000;
-    let timeout = Duration::from_secs(60);
+    let timeout = Duration::from_secs(5);
     let start_time = Instant::now();
     let mut spins = 0;
 
@@ -136,7 +132,7 @@ fn wait_until_complete(epoch: u64) -> Result<(), ()> {
 
 fn wait_until_backend_ready() -> Result<(), ()> {
     const SPIN_ITERS: usize = 10_000;
-    let timeout = Duration::from_secs(60);
+    let timeout = Duration::from_secs(5);
     let start_time = Instant::now();
     let mut spins = 0;
 
@@ -428,7 +424,7 @@ impl<S> FastDynExecutor<S> {
 
 impl<EM, I, S, Z> Executor<EM, I, S, Z> for FastDynExecutor<S>
 where
-    S: HasCorpus<I> + HasExecutions + HasNamedMetadata + ser::Serialize,
+    S: HasCorpus<I> + HasExecutions + HasNamedMetadata,
     I: HasTargetBytes,
 {
     fn run_target(
@@ -439,14 +435,15 @@ where
         input: &I,
     ) -> Result<ExitKind, libafl::Error> {
         if self.crashed {
-            // serialize and panic only after libafl observes previous input outcome
-            let encoded = bincode::serialize(&state).expect("Couldn't serialize state");
-            std::fs::write(STATE_PATH, encoded).expect("Couldn't write serialized state to file");
-
+            // Exit only after LibAFL observes the previous input outcome.
+            // Campaign state intentionally remains in memory: stale state.bin
+            // files have caused later runs to resume an incompatible campaign.
             panic!("Fuzzer cannot continue, reached a hard fault or timeout");
         }
 
-        self.trace_initial_corpus_inputs();
+        // Trace re-execution is intentionally disabled.  Each trace capture
+        // performs another target round-trip and can perturb the fuzzing
+        // handshake independently of the normal input execution.
 
         // We need to keep track of the exec count.
         *state.executions_mut() += 1;
@@ -472,32 +469,7 @@ where
                 self.crashed = true;
                 Ok(ExitKind::Crash)
             }
-            _ => {
-                if maxmapfeedback_last_input_interesting(state) {
-                    let trace_status = trace_input_once(input);
-
-                    if let Err(err) = trace_interesting_write_completed_trace(input, trace_status) {
-                        eprintln!("Failed to write interesting trace: {:?}", err);
-                    }
-
-                    match trace_status {
-                        ASSERT_RECOVERABLE => Ok(ExitKind::Crash),
-                        ASSERT_FATAL => {
-                            log_fatal_input(buf);
-                            self.crashed = true;
-                            Ok(ExitKind::Crash)
-                        }
-                        ASSERT_TIMEOUT => {
-                            log_timeout_input(buf);
-                            self.crashed = true;
-                            Ok(ExitKind::Timeout)
-                        }
-                        _ => Ok(ExitKind::Ok),
-                    }
-                } else {
-                    Ok(ExitKind::Ok)
-                }
-            }
+            _ => Ok(ExitKind::Ok),
         }
     }
 }
@@ -558,19 +530,14 @@ pub fn fuzzer_thread_main() {
         }
     }
 
-    let mut state = if std::path::Path::new(STATE_PATH).exists() {
-        let bytes = std::fs::read(STATE_PATH).expect("Couldn't open state");
-        bincode::deserialize(&bytes).expect("Couldn't deserialize state")
-    } else {
-        StdState::new(
-            StdRand::with_seed(current_nanos()),
-            corpus,
-            crash_corpus,
-            &mut feedback,
-            &mut objective,
-        )
-        .unwrap()
-    };
+    let mut state = StdState::new(
+        StdRand::with_seed(current_nanos()),
+        corpus,
+        crash_corpus,
+        &mut feedback,
+        &mut objective,
+    )
+    .unwrap();
 
     // The Monitor trait defines how the fuzzer stats are displayed to the user.
     // Keep the human-readable monitor, and also expose structured snapshots for
@@ -646,8 +613,6 @@ pub fn fuzzer_thread_main() {
             unsafe {
                 fuzz_dump_bbl();
             }
-            let encoded = bincode::serialize(&state).expect("Coudln't serialize state");
-            std::fs::write(STATE_PATH, encoded).expect("Couldn't write serialized state to file");
             panic!("Fuzzer stopping as requested");
         }
 
