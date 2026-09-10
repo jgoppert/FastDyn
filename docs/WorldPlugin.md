@@ -195,6 +195,28 @@ causality and unit, shows the runtime log, and lists physical events. It
 **only reads artifacts** — it cannot advance or steer the world, which is
 correct here, because the guest decides when physics advances.
 
+### If the plots are flat but events keep arriving
+
+The observer plots a rolling window of the last 5000 trace samples. If the
+firmware stops driving its pin, the capacitor settles and that window becomes a
+straight line, even though the run looks healthy and the event list keeps
+filling.
+
+The demo firmware derives its pin edge from the sample counter
+(`sample_index % SAMPLES_PER_LEVEL`) precisely so this cannot happen. An
+earlier version used a nested loop bounded by a comparison against the running
+counter, which GCC compiles to `cmp/bne`:
+
+```text
+8000106:  cmp r7, r8        ; r8 = sample_index + 1, r7 = target
+8000108:  bne.n 80000a4
+```
+
+A single miscount lets `r8` step past `r7`, and that loop then never exits: the
+pin is stuck, the physics freezes, and the plots flatten. If you write your own
+world-driving firmware, bound its loops so they cannot be wedged by one bad
+iteration.
+
 ### If the page never leaves "waiting for trace"
 
 The host half of this plugin runs whether or not the native half was compiled

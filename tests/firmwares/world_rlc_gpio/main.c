@@ -85,15 +85,26 @@ static void delay(volatile uint32_t iterations)
 int main(void)
 {
     char line[96];
-    int level = 1;
+    int level = 0;
     uint32_t sample_index = 0;
 
     sh_write0("world_rlc_gpio: driving an RLC circuit from a GPIO pin\r\n");
     sh_write0("  sample  pin      capacitor\r\n");
 
+    /*
+     * One flat loop, with the pin edge derived from the sample counter rather
+     * than from a nested trip count. A nested loop bounded by a comparison
+     * against a running counter can be wedged permanently by a single
+     * miscount -- the counter steps past the bound and the inner loop never
+     * exits, leaving the pin stuck and the physics frozen. Deriving the edge
+     * from the counter cannot wedge: at worst an edge shifts by one sample.
+     */
     for (;;) {
-        world_gpio_write(level);
-        for (int sample = 0; sample < SAMPLES_PER_LEVEL; sample++) {
+        if ((sample_index % SAMPLES_PER_LEVEL) == 0) {
+            level = !level;
+            world_gpio_write(level);
+        }
+        {
             delay(DELAY_ITERATIONS);
             int millivolts = world_adc_read();
             char *cursor = line;
@@ -114,7 +125,6 @@ int main(void)
             *cursor = '\0';
             sh_write0(line);
         }
-        level = !level;
     }
 }
 
