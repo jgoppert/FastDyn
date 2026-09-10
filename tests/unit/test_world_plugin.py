@@ -228,6 +228,7 @@ def test_derived_world_toml_carries_absolute_fmu_paths(tmp_path):
         stop_ns=200000000,
         trace_output=tmp_path / "trace.csv",
         trace_variables=["rlc.output_voltage"],
+        log_output=tmp_path / "runtime.log",
         host="127.0.0.1",
         port=8770,
         open_browser=False,
@@ -238,6 +239,7 @@ def test_derived_world_toml_carries_absolute_fmu_paths(tmp_path):
     assert 'vcap = "rlc.output_voltage"' in text      # [World.Outputs]
     assert "resistance = 10.0" in text
     assert f'output = "{tmp_path / "trace.csv"}"' in text
+    assert f'output = "{tmp_path / "runtime.log"}"' in text   # [Logging]
     # FastDyn owns the observer's lifetime, so the generator must not start it.
     assert "launch_on_generate = false" in text
     assert "enabled = true" in text

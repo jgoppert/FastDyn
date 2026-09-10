@@ -41,6 +41,7 @@ typedef struct {
     double low;   /* digital_out: level for a zero register value */
     double high;  /* digital_out: level for a non-zero register value */
     double scale; /* analog_in: physical value -> integer register value */
+    int last_level;  /* digital_out: -1 until the first write */
 } WorldPin;
 
 static const VirtualContext *runtime;
@@ -53,6 +54,31 @@ static WorldPin pins[WORLD_MAX_PINS];
 static size_t pin_count;
 static uint64_t world_time_ns;
 static bool world_ready;
+static FILE *world_log;
+
+/*
+ * world_model routes FMU diagnostics through a log callback. Its generated
+ * harness installs one that writes the runtime log its observer displays;
+ * FastDyn owns the runtime here, so it installs the equivalent. The field
+ * layout is world_model's: "<ns> ns | <source> | <severity> | <category> |
+ * <message>", and its observer picks physical events out of that stream by
+ * matching the "event" severity.
+ */
+static void world_log_callback(uint64_t time_ns, const char *model, const char *severity,
+                               const char *category, const char *message, void *user)
+{
+    FILE *stream = user;
+    if (!stream) {
+        return;
+    }
+    fprintf(stream, "%llu ns | %s | %s | %s | %s\n",
+            (unsigned long long)time_ns,
+            model ? model : "world",
+            severity ? severity : "info",
+            category ? category : "",
+            message ? message : "");
+    fflush(stream);
+}
 
 static void world_fail(const char *what)
 {
@@ -189,6 +215,14 @@ static int load_manifest(const VirtualContext *ctx)
                 world_fail("cannot connect world endpoints");
                 fclose(stream);
                 return -1;
+            }
+        } else if (strcmp(field[0], "log") == 0 && nfields == 2) {
+            world_log = fopen(field[1], "w");
+            if (!world_log) {
+                virtual_log(ctx, VIRTUAL_LOG_WARN,
+                            "cannot open world runtime log %s", field[1]);
+            } else {
+                wm_set_log_callback(world_log_callback, world_log);
             }
         } else if (strcmp(field[0], "trace") == 0 && nfields == 2) {
             snprintf(trace_output_buf, sizeof(trace_output_buf), "%s", field[1]);
@@ -330,6 +364,7 @@ static WorldPin *pin_for(void *userdata, bool digital)
     }
     pin->reg = (int)strtol(field[1], NULL, 10);
     pin->userdata = (const char *)userdata;
+    pin->last_level = -1;
     if (digital) {
         if (nfields != 4) {
             virtual_log(runtime, VIRTUAL_LOG_ERROR,
@@ -370,6 +405,18 @@ static void world_digital_out(unsigned int cpu_index, void *userdata)
     value.data.f64 = level ? pin->high : pin->low;
     if (wm_model_set_handle(pin->endpoint->model, pin->endpoint->handle, &value) != WM_OK) {
         world_fail("cannot drive world input");
+        return;
+    }
+    /*
+     * Firmware rewrites an unchanged level far more often than it changes it,
+     * so only an edge is worth reporting as a physical event.
+     */
+    if (pin->last_level != (int)(level != 0)) {
+        char message[128];
+        pin->last_level = (int)(level != 0);
+        snprintf(message, sizeof(message), "%s driven to %.3f",
+                 pin->endpoint->alias, value.data.f64);
+        wm_log_event(world_time_ns, pin->endpoint->alias, "pin", message);
     }
 }
 
@@ -402,6 +449,7 @@ static void world_shutdown(void)
         return;
     }
     virtual_log(runtime, VIRTUAL_LOG_INFO, "world stopped at %" PRIu64 " ns", world_time_ns);
+    wm_log_event(world_time_ns, "world", "lifecycle", "run finished");
     wm_world_destroy(world);
     world = NULL;
     for (i = 0; i < model_count; ++i) {
@@ -409,6 +457,11 @@ static void world_shutdown(void)
     }
     model_count = 0;
     world_ready = false;
+    if (world_log) {
+        wm_set_log_callback(NULL, NULL);
+        fclose(world_log);
+        world_log = NULL;
+    }
 }
 
 static int world_runtime_init(const VirtualContext *ctx)

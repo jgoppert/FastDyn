@@ -189,9 +189,30 @@ World observer available at http://127.0.0.1:8770
 ```
 
 The page plots the traced series, lists every physical variable with its
-causality and unit, and shows the runtime log. It **only reads artifacts** — it
-cannot advance or steer the world, which is correct here, because the guest
-decides when physics advances.
+causality and unit, shows the runtime log, and lists physical events. It
+**only reads artifacts** — it cannot advance or steer the world, which is
+correct here, because the guest decides when physics advances.
+
+### The runtime log and physical events
+
+world_model routes FMU diagnostics through a log callback, and its observer
+reads the resulting file for both its log panel and its event list. world's own
+generated harness installs that callback; FastDyn owns the runtime here, so the
+plugin installs the equivalent and writes `run-artifacts/world/runtime.log` in
+world_model's format:
+
+```text
+189505 ns | supply | event | pin | supply driven to 3.300
+38643201 ns | supply | event | pin | supply driven to 0.000
+```
+
+The observer picks physical events out of that stream by matching the `event`
+severity, so each pin edge appears in its event list. An edge is reported only
+when the level actually changes — firmware rewrites an unchanged level far more
+often than it changes it.
+
+Without this the log and event panels sit empty and read as though something is
+broken, which is what they did before the callback was installed.
 
 Generating the metadata rather than hand-writing it keeps world_model's
 artifact format inside world_model. `observer` accepts `true` as shorthand for
@@ -211,6 +232,9 @@ never exits, so the plots keep scrolling.
 fastdyn run -c configs/world_rlc_observer_master.toml -o fastdyn_work_observer
 # open http://127.0.0.1:8770; Ctrl-C to stop
 ```
+
+The observer starts before QEMU does, so for the first moment the page reads
+`waiting for trace`. It clears itself once the guest begins.
 
 This configuration sets `icount = { shift = 5, sleep = true, align = true }`,
 which throttles the guest to the wall clock. That matters for a continuous

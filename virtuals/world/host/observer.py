@@ -43,6 +43,7 @@ def write_world_toml(
     stop_ns: int,
     trace_output: Path,
     trace_variables: list[str],
+    log_output: Path,
     host: str,
     port: int,
     open_browser: bool,
@@ -95,6 +96,11 @@ def write_world_toml(
     if trace_variables:
         rendered = ", ".join(_toml_string(v) for v in trace_variables)
         lines.append(f"variables = [{rendered}]")
+    lines.append("")
+    # Points the observer's log and physical-event panels at the file the
+    # FastDyn runtime writes through world_model's log callback.
+    lines.append("[Logging]")
+    lines.append(f"output = {_toml_string(str(log_output))}")
     lines.append("")
     lines.append("[Frontend]")
     lines.append("enabled = true")

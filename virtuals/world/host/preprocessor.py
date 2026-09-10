@@ -232,8 +232,14 @@ class WorldRunPreprocessor:
             endpoint_specs[alias] = {"target": target, "direction": direction}
             lines.append(f"endpoint\t{alias}\t{model_name}\t{variable}\t{direction}")
 
+        # world_model routes FMU diagnostics and physical events through a log
+        # callback. The runtime writes them here; the observer displays them.
+        log_path = ctx.plugin_artifact_path("runtime.log")
+        log_path.write_text("", encoding="utf-8")
+        lines.append(f"log\t{log_path}")
+
         trace = _table(settings, "trace")
-        artifacts = []
+        artifacts = [log_path]
         trace_path = None
         trace_variables: list[str] = []
         if trace:
@@ -262,7 +268,7 @@ class WorldRunPreprocessor:
         cleanup: list[Callable[[], None]] = []
         observer_artifacts = self._observer(
             ctx, settings, resolved_models, endpoint_specs, _table(settings, "connections"),
-            step_ns, trace_path, trace_variables, cleanup,
+            step_ns, trace_path, trace_variables, log_path, cleanup,
         )
         artifacts.extend(observer_artifacts)
 
@@ -273,7 +279,7 @@ class WorldRunPreprocessor:
         return RunPrepareResult(virtuals=virtuals, artifacts=artifacts, cleanup=cleanup)
 
     def _observer(self, ctx, settings, models, endpoint_specs, connections,
-                  step_ns, trace_path, trace_variables, cleanup) -> list[Path]:
+                  step_ns, trace_path, trace_variables, log_path, cleanup) -> list[Path]:
         """Optionally serve world_model's read-only observer for this run."""
         config = settings.get("observer", False)
         if isinstance(config, bool):
@@ -306,6 +312,7 @@ class WorldRunPreprocessor:
             models=models, endpoints=endpoint_specs, connections=connections,
             step_ns=step_ns, stop_ns=stop_ns or step_ns * 2000,
             trace_output=trace_path, trace_variables=trace_variables,
+            log_output=log_path,
             host=host, port=port, open_browser=open_browser,
         )
         manifest = generate_artifacts(WORLD_ROOT, world_toml, out_dir)
