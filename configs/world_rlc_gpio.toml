@@ -1,0 +1,97 @@
+# ============================================================================
+# world_model demo: a firmware GPIO pin drives an FMI 3 RLC circuit.
+#
+#   fastdyn run -c configs/world_rlc_gpio.toml -o fastdyn_work_world
+#
+# Prerequisites (see docs/WorldPlugin.md):
+#   cmake -S tools/world -B tools/world/build -DWM_BUILD_TESTS=ON
+#   cmake --build tools/world/build --target rlc_fmu
+#   tests/firmwares/world_rlc_gpio/build.sh
+#   make WORLD=true qemu_path=<path/to/qemu>
+#
+# This one file describes the machine and the physical world it is wired to.
+# ============================================================================
+
+[Machine]
+platform = "generic-cortexm"
+qemu_path = "qemu/build/qemu-system-arm"
+display = "none"
+monitor_port = 0
+qmp_socket = "/tmp/fastdyn-world-rlc.qmp"
+log_options = "none"
+reset_memory_files = true
+semihosting = true
+semihosting_config = "enable=on,target=native"
+# Instruction-counted virtual time: guest nanoseconds become a deterministic
+# function of instructions retired, so the world advances reproducibly.
+icount = { shift = 5, sleep = false, align = false }
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "8M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-world-rlc.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "cortexm"
+cpu = "cortex-m3"
+binary = "tests/binaries/world_rlc_gpio/world_rlc_gpio.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x08000000"
+
+# ---------------------------------------------------------------------------
+# The physical world.
+# ---------------------------------------------------------------------------
+
+[CPU.cpu0.plugins.world]
+enabled = true
+# Co-simulation quantum. The RLC's dominant time constant is about 8.9 ms,
+# so 100 us resolves the transient comfortably.
+step_ns = 100000
+
+[CPU.cpu0.plugins.world.models.rlc]
+path = "tools/world/examples/rlc/out/RLC.fmu"
+
+[CPU.cpu0.plugins.world.models.rlc.parameters]
+resistance = 10.0
+inductance = 0.01
+capacitance = 0.001
+
+# Stable names for the world variables this run cares about.
+[CPU.cpu0.plugins.world.endpoints]
+supply = { target = "rlc.voltage", direction = "in" }
+vcap = { target = "rlc.output_voltage", direction = "out" }
+current = { target = "rlc.current", direction = "out" }
+
+[CPU.cpu0.plugins.world.trace]
+output = "rlc_trace.csv"
+variables = ["rlc.output_voltage", "rlc.current"]
+
+# ---------------------------------------------------------------------------
+# Where the firmware meets the world.
+# ---------------------------------------------------------------------------
+
+# The GPIO pin: r0 holds the level the firmware is writing.
+[[CPU.cpu0.plugins.world.pins]]
+at = "world_gpio_write"
+kind = "digital_out"
+endpoint = "supply"
+register = "r0"
+low = 0.0
+high = 3.3
+
+# The analog input: the capacitor voltage is returned in r0 as millivolts.
+[[CPU.cpu0.plugins.world.pins]]
+at = "world_adc_read"
+kind = "analog_in"
+endpoint = "vcap"
+register = "r0"
+scale = 1000.0

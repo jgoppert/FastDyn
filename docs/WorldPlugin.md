@@ -1,0 +1,316 @@
+# World Model Plugin
+
+The `world` plugin co-simulates FMI 3 physics alongside emulated firmware and
+wires that physics to guest pins. A Modelica model becomes a peripheral's
+physical behavior without a line of C.
+
+This page documents the complete pipeline through a runnable demonstration:
+firmware toggles a GPIO pin, the pin drives the supply of an RLC circuit, and
+the firmware reads the capacitor voltage back through an analog input.
+
+```text
+RLC.mo                Modelica source
+  |  (exporter)
+  v
+RLC.fmu               FMI 3 Co-Simulation archive
+  |  [CPU.cpu0.plugins.world.models]
+  v
+world.manifest        written by the host preprocessor
+  |  virtual_artifact_path()
+  v
+world_model runtime   inside libfastdyn.so
+  |  world_digital_out / world_analog_in at firmware PCs
+  v
+guest registers       what the firmware sees
+```
+
+## Run the demonstration
+
+```bash
+# 1. Build world_model and the RLC demonstration FMU.
+python3 -m venv tools/world/venv
+tools/world/venv/bin/pip install -e tools/world
+cmake -S tools/world -B tools/world/build -DWM_BUILD_TESTS=ON
+cmake --build tools/world/build
+
+# 2. Build the demo firmware.
+tests/firmwares/world_rlc_gpio/build.sh
+
+# 3. Build FastDyn. The plugin compiles itself in when step 1 has produced
+#    tools/world/build/libworld_model.so, and is skipped otherwise; it needs
+#    no build flag.
+make qemu_path=<path/to/qemu>
+
+# 4. Run.
+export LD_LIBRARY_PATH=$PWD/tools/world/build:$PWD/build:$LD_LIBRARY_PATH
+fastdyn run -c configs/world_rlc_gpio.toml -o fastdyn_work_world
+```
+
+Expected output, showing the capacitor charging toward 3.3 V while the pin is
+high and discharging toward 0 V while it is low:
+
+```text
+world_rlc_gpio: driving an RLC circuit from a GPIO pin
+  sample  pin      capacitor
+     0  1      1106 mV
+     1  1      2019 mV
+     2  1      2555 mV
+     3  1      2866 mV
+   ...
+     8  0      2165 mV
+     9  0      1263 mV
+    10  0       735 mV
+```
+
+The bundled RLC is overdamped (R = 10 Ω, L = 10 mH, C = 1 mF), giving a
+dominant time constant near 8.9 ms, so a 100 µs communication step resolves
+the transient comfortably.
+
+## One configuration file
+
+`configs/world_rlc_gpio.toml` describes the machine and the physical world it
+is attached to. Everything world-specific lives under one plugin table.
+
+### Models
+
+```toml
+[CPU.cpu0.plugins.world]
+enabled = true
+step_ns = 100000          # co-simulation communication quantum
+
+[CPU.cpu0.plugins.world.models.rlc]
+path = "tools/world/examples/rlc/out/RLC.fmu"
+
+[CPU.cpu0.plugins.world.models.rlc.parameters]
+resistance = 10.0
+inductance = 0.01
+capacitance = 0.001
+```
+
+Relative paths resolve against the working directory. Parameters are applied
+at initialization and on every reset. Declare several
+`[CPU.cpu0.plugins.world.models.<name>]` tables to compose multiple FMUs, and
+link them with `[CPU.cpu0.plugins.world.connections]`; the runtime rejects
+dependency cycles before initialization.
+
+### Endpoints
+
+An endpoint gives a stable local name to one world variable, so firmware
+bindings do not spell out exporter-specific paths:
+
+```toml
+[CPU.cpu0.plugins.world.endpoints]
+supply  = { target = "rlc.voltage",        direction = "in" }
+vcap    = { target = "rlc.output_voltage", direction = "out" }
+current = { target = "rlc.current",        direction = "out" }
+```
+
+`target` is `<model>.<variable>`, where the variable name is the one declared
+in the FMU's `modelDescription.xml`. `direction` is checked against the
+variable's FMI causality at runtime: binding an output as an input fails with
+a causality error rather than silently doing nothing.
+
+### Pins
+
+A pin binds an endpoint to a firmware program counter.
+
+```toml
+[[CPU.cpu0.plugins.world.pins]]
+at = "world_gpio_write"     # firmware symbol, or "0x8000082"
+kind = "digital_out"
+endpoint = "supply"
+register = "r0"
+low = 0.0
+high = 3.3
+
+[[CPU.cpu0.plugins.world.pins]]
+at = "world_adc_read"
+kind = "analog_in"
+endpoint = "vcap"
+register = "r0"
+scale = 1000.0              # volts -> millivolts
+```
+
+| Key | Meaning |
+| --- | --- |
+| `at` | Trigger PC: a firmware symbol name or a numeric address. |
+| `kind` | `digital_out` drives a world input; `analog_in` samples a world output. |
+| `endpoint` | The endpoint declared above. Direction is validated against `kind`. |
+| `register` | Core register carrying the value (`r0`-`r12`, `sp`, `lr`, `pc`). |
+| `low` / `high` | `digital_out` only: the physical values for a zero and non-zero register. |
+| `scale` | `analog_in` only: multiplied into the physical value before the integer register write. |
+
+### Trace
+
+```toml
+[CPU.cpu0.plugins.world.trace]
+output = "rlc_trace.csv"
+variables = ["rlc.output_voltage", "rlc.current"]
+```
+
+The CSV lands under `<work-dir>/run-artifacts/world/` and is sampled at
+initialization and at every internal communication point — far finer than the
+firmware's own sampling, which is the point: it records what the physics did
+between observations.
+
+## How firmware exposes a pin
+
+A pin needs a stable instruction to trigger on, and for `analog_in` the
+written register must survive to the caller. Both are satisfied by a naked
+stub:
+
+```c
+__attribute__((naked, noinline)) void world_gpio_write(int level)
+{
+    (void)level;
+    __asm__ volatile("bx lr");
+}
+
+__attribute__((naked, noinline)) int world_adc_read(void)
+{
+    __asm__ volatile("bx lr");
+}
+```
+
+The virtual bound to `world_gpio_write` reads the level the firmware passed in
+`r0`. The virtual bound to `world_adc_read` writes millivolts into `r0`, and
+the stub's single `bx lr` returns it. Because the body is empty, nothing
+between the hook and the return can disturb the register.
+
+This is the function-hook integration path. It is firmware-specific by
+construction: the addresses are valid only for one build. Modeling the
+peripheral itself so that ordinary MMIO reaches the world is a separate and
+larger piece of work; see [WorldIntegration.md](WorldIntegration.md).
+
+## What the host preprocessor does
+
+`virtuals/world/host/preprocessor.py` owns every world-specific concern:
+
+1. validates the plugin table — models, endpoints, pins, trace;
+2. resolves FMU paths and fails with the build command when one is missing;
+3. resolves symbolic pin triggers from the firmware ELF, clearing the ARM
+   Thumb mode bit, and only when a symbolic name is actually used;
+4. checks each pin's `kind` against its endpoint's declared direction;
+5. rejects two pins that resolve to the same address, because the native
+   dispatcher supports one callback per PC;
+6. writes `run-artifacts/world/world.manifest`; and
+7. returns the pin rules as generated `VirtualInstruction`s.
+
+The generated rules then flow through FastDyn's ordinary pipeline — trigger
+resolution, conflict validation, serialization — exactly like user-authored
+ones. For this configuration `<work-dir>/virtuals/virtuals.txt` contains:
+
+```text
+0x8000082 world_digital_out supply 0 0.0 3.3
+0x8000084 world_analog_in vcap 0 1000.0
+```
+
+and the manifest is:
+
+```text
+step_ns	100000
+model	rlc	/data/fastdyn/tools/world/examples/rlc/out/RLC.fmu
+param	rlc	resistance	10.0
+endpoint	supply	rlc	voltage	in
+endpoint	vcap	rlc	output_voltage	out
+trace	/data/fastdyn/fastdyn_work_world/run-artifacts/world/rlc_trace.csv
+trace_var	rlc.output_voltage
+```
+
+## What the native runtime does
+
+`virtuals/world/runtime/world_plugin.c` registers `world_digital_out` and
+`world_analog_in`, then builds the world from the manifest through
+world_model's public C API: `wm_model_load`, `wm_world_create`,
+`wm_world_add_model`, `wm_world_set_parameter`, `wm_world_configure_trace`,
+`wm_world_initialize`.
+
+Every endpoint resolves once, after initialization, to a
+`wm_variable_handle_t`. The callbacks use handles, never a name lookup.
+
+## Time
+
+The world advances only when the guest observes or drives it:
+
+```c
+static void world_sync(void)
+{
+    uint64_t now = virtual_guest_time_ns(runtime);
+    if (now <= world_time_ns) return;
+    wm_world_advance_to(world, now);
+    world_time_ns = now;
+}
+```
+
+Each callback calls this before acting. Three properties follow:
+
+- **Physics is fresh at the instant of the access.** There is no tick rate to
+  tune against the firmware's sampling rate, and no aliasing between them.
+- **The world never runs ahead of the guest,** so a read cannot return a value
+  from the guest's future.
+- **Repeated accesses in one guest instant are free.** `wm_world_advance_to`
+  iterates `while (time_ns < target)`, so an unchanged timestamp does no work.
+
+A `digital_out` pin advances *before* applying the new level, so the interval
+that just elapsed is integrated with the value that was actually applied
+during it, and the new level takes effect from that instant forward.
+
+The demonstration configuration enables `icount`, which makes guest
+nanoseconds a deterministic function of instructions retired. The world
+therefore advances identically on every run — necessary for twintrace replay
+and for reproducible fuzzing.
+
+**This policy is sufficient here because the demo's interrupts do not come
+from physics.** Firmware that sleeps waiting for an interrupt the world must
+generate would never wake, since no access would advance the world. Such a
+configuration needs a periodic advance as a floor; FastDyn's existing
+`raise_periodic_irq` is the natural carrier.
+
+## Abstraction boundaries
+
+The plugin follows [WritingVirtuals.md](WritingVirtuals.md):
+
+- Native and host halves live together under `virtuals/world/`, discovered
+  generically — the frontend contains no reference to `world`.
+- The plugin is self-enabling. It adds no build option and no top-level make
+  flag; `virtuals/meson.build` lists it exactly as it lists the other
+  compiled-in plugins, and the plugin's own `meson.build` decides whether it
+  can build. `Makefile`, `meson_options.txt` and `src/fastdyn/` are untouched.
+- The runtime registers itself with `VIRTUAL_PLUGIN("world", ...)`. No entry
+  was added to `cb_registry`, and `virtuals/virtuals.c` is untouched.
+- No QEMU `--plugin` argument is added. Configuration reaches the runtime as
+  an artifact resolved through `virtual_artifact_path()`.
+- Register indices come from `include/fastdyn/arch/arm32.h` by name; no raw
+  register numbers appear in the configuration or the runtime.
+- Callback arguments are parsed and validated defensively in C even though the
+  preprocessor already validated them.
+
+## Limitations
+
+- **ARM only.** `register = "..."` names are validated against the ARM core
+  register set; other architectures are rejected with a clear error rather
+  than silently mismapped.
+- **Endpoint names must not collide with firmware symbol names.** FastDyn's
+  generic argument resolution rewrites a token that matches a symbol into its
+  address. Prefer descriptive endpoint names such as `supply` over names that
+  might exist in the ELF.
+- **Scalar Float64 endpoints.** The pin types cover the digital-out and
+  analog-in cases; other FMI types are not yet exposed through pins.
+- **No reset protocol.** `wm_world_reset()` exists but FMI state
+  serialization does not, so a fuzzing loop that snapshots and restores guest
+  state will desynchronize the world. World-backed models are not yet suitable
+  for the in-process fuzzing path.
+- **Event mode is rejected.** world_model refuses FMUs that use early return
+  or event mode. Check an exporter's output before committing to it.
+
+## Files
+
+| Path | Role |
+| --- | --- |
+| `virtuals/world/host/preprocessor.py` | Validation, manifest generation, pin rules |
+| `virtuals/world/runtime/world_plugin.c` | World construction and the two callbacks |
+| `virtuals/world/meson.build` | Detects a built `tools/world` and links `libworld_model` |
+| `configs/world_rlc_gpio.toml` | The single demonstration configuration |
+| `tests/firmwares/world_rlc_gpio/` | Demo firmware source, linker script, build script |
+| `tests/unit/test_world_plugin.py` | Host-side preprocessor tests |
+| `tools/world/` | The standalone world_model runtime |
