@@ -1,10 +1,18 @@
 # ============================================================================
-# world_model demo: a firmware GPIO pin drives an FMI 3 RLC circuit.
+# world_model demo with the web observer, FastDyn owning its own clock.
 #
-#   fastdyn run -c configs/world_rlc_gpio.toml -o fastdyn_work_world
+# Identical to configs/world_rlc_gpio.toml, plus world_model's read-only
+# observer. Here physics advances on access -- whenever the firmware touches a
+# world-backed pin -- so nothing external paces the run.
 #
-# The firmware toggles its pin continuously and does not exit; stop it with
-# Ctrl-C.
+# The firmware toggles its pin continuously and never exits, so the RLC keeps
+# charging and discharging and the plots keep extending. Open the printed URL
+# and watch; stop the run with Ctrl-C when you are done.
+#
+# For a step-by-step view where you control how far time advances, use
+# configs/world_rlc_observer_slave.toml instead.
+#
+#   fastdyn run -c configs/world_rlc_observer_master.toml -o fastdyn_work_observer
 #
 # Prerequisites (see docs/WorldPlugin.md):
 #   cmake -S tools/world -B tools/world/build -DWM_BUILD_TESTS=ON
@@ -20,7 +28,7 @@ platform = "generic-cortexm"
 qemu_path = "qemu/build/qemu-system-arm"
 display = "none"
 monitor_port = 0
-qmp_socket = "/tmp/fastdyn-world-rlc.qmp"
+qmp_socket = "/tmp/fastdyn-observer-master.qmp"
 log_options = "none"
 reset_memory_files = true
 semihosting = true
@@ -42,7 +50,7 @@ base_address = "0x20000000"
 memory_size = "8M"
 memory_type = "SRAM"
 backend = "file"
-memory_file = "/tmp/fastdyn-world-rlc.ram"
+memory_file = "/tmp/fastdyn-observer-master.ram"
 share = true
 
 [CPU]
@@ -80,7 +88,23 @@ current = { target = "rlc.current", direction = "out" }
 
 [CPU.cpu0.plugins.world.trace]
 output = "rlc_trace.csv"
-variables = ["rlc.output_voltage", "rlc.current"]
+# The observer plots exactly these series, each in a stable colour.
+variables = ["rlc.voltage", "rlc.output_voltage", "rlc.current"]
+
+# ---------------------------------------------------------------------------
+# world_model's read-only web observer.
+#
+# FastDyn derives a world TOML from the tables above, runs world_model's own
+# generator to produce the observer's metadata, and serves it. The observer
+# only reads artifacts: it plots the trace and cannot steer the world.
+# ---------------------------------------------------------------------------
+[CPU.cpu0.plugins.world.observer]
+enabled = true
+host = "127.0.0.1"
+port = 8770
+open_browser = false
+# Initial x-axis extent of the plots, in nanoseconds. Cosmetic only.
+horizon_ns = 200_000_000
 
 # ---------------------------------------------------------------------------
 # Where the firmware meets the world.

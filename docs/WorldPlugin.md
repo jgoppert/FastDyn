@@ -63,7 +63,12 @@ world_rlc_gpio: driving an RLC circuit from a GPIO pin
      8  0      2165 mV
      9  0      1263 mV
     10  0       735 mV
+   ...
+    16  1      1134 mV
 ```
+
+The firmware toggles indefinitely, so this repeats until you stop the run with
+Ctrl-C.
 
 The bundled RLC is overdamped (R = 10 Ω, L = 10 mH, C = 1 mF), giving a
 dominant time constant near 8.9 ms, so a 100 µs communication step resolves
@@ -192,16 +197,36 @@ Generating the metadata rather than hand-writing it keeps world_model's
 artifact format inside world_model. `observer` accepts `true` as shorthand for
 a default table, and requires a `trace` table, since a plot needs a trace.
 
-### Pair it with slave mode
+The observer serves for the lifetime of the run, and shows a **rolling window
+of the last 5000 trace samples** — 500 ms of physics at the demo's 100 µs
+resolution. Two configurations use it, one per co-simulation mode.
 
-The observer lives for the length of the run, and this demo firmware finishes
-in about a second — too fast to watch. `configs/world_rlc_observer.toml`
-therefore combines the observer with [slave mode](CoSimulationSlave.md), so a
-master paces the guest and you watch the curves extend one slice at a time:
+### Watch it live: `configs/world_rlc_observer_master.toml`
+
+FastDyn owns its own clock here: physics advances on access, whenever the
+firmware touches a world-backed pin. The firmware toggles continuously and
+never exits, so the plots keep scrolling.
+
+```bash
+fastdyn run -c configs/world_rlc_observer_master.toml -o fastdyn_work_observer
+# open http://127.0.0.1:8770; Ctrl-C to stop
+```
+
+This configuration sets `icount = { shift = 5, sleep = true, align = true }`,
+which throttles the guest to the wall clock. That matters for a continuous
+firmware: unpaced, the guest outruns realtime by more than an order of
+magnitude and emits thousands of samples a second. Paced, virtual time tracks
+real time almost exactly — 13.38 s of guest time in 13 s of wall time — so the
+scrolling plot reads like a scope.
+
+### Step through it: `configs/world_rlc_observer_slave.toml`
+
+The same world in [slave mode](CoSimulationSlave.md), where a master decides
+how far time advances, so you extend the curves one slice at a time.
 
 ```bash
 # Terminal 1: the guest starts paused, with the observer already serving.
-fastdyn run -c configs/world_rlc_observer.toml -o fastdyn_work_observer
+fastdyn run -c configs/world_rlc_observer_slave.toml -o fastdyn_work_observer
 
 # Terminal 2: open http://127.0.0.1:8770, then grant time in small steps.
 utils/fastdyn_cosim.py /tmp/fastdyn-observer.qmp --slice-ms 5 --slices 40
@@ -210,7 +235,9 @@ utils/fastdyn_cosim.py /tmp/fastdyn-observer.qmp --slice-ms 5 --slices 40
 Before the first slice the trace holds a single row — the sample at time zero —
 because nothing has run. After 20 slices of 5 ms it holds 984 rows across
 `time_ns`, `rlc.voltage`, `rlc.output_voltage` and `rlc.current`. The physics
-advances only when the master says so, and the plot shows exactly that.
+advances only when the master says so, and the plot shows exactly that. This
+configuration leaves `align` false: the master sets the pace, so QEMU should
+not also throttle to the wall clock.
 
 ## How firmware exposes a pin
 
@@ -235,6 +262,12 @@ The virtual bound to `world_gpio_write` reads the level the firmware passed in
 `r0`. The virtual bound to `world_adc_read` writes millivolts into `r0`, and
 the stub's single `bx lr` returns it. Because the body is empty, nothing
 between the hook and the return can disturb the register.
+
+The firmware toggles its pin continuously and never exits, so there is always
+physics to observe. Stop a run with Ctrl-C, or bound it from a co-simulation
+master by granting a fixed number of slices. A firmware that never ends is also
+the right shape under a master: the run lasts exactly as long as the master
+grants, instead of the guest shutting down underneath it mid-slice.
 
 This is the function-hook integration path. It is firmware-specific by
 construction: the addresses are valid only for one build. Modeling the
@@ -370,7 +403,8 @@ The plugin follows [WritingVirtuals.md](WritingVirtuals.md):
 | `virtuals/world/runtime/world_plugin.c` | World construction and the two callbacks |
 | `virtuals/world/meson.build` | Detects a built `tools/world` and links `libworld_model` |
 | `configs/world_rlc_gpio.toml` | The single demonstration configuration |
-| `configs/world_rlc_observer.toml` | The same world with the web observer, paced by a master |
+| `configs/world_rlc_observer_master.toml` | The same world with the web observer, running live |
+| `configs/world_rlc_observer_slave.toml` | The same world with the observer, paced by a master |
 | `virtuals/world/host/observer.py` | Derives the world TOML, generates metadata, serves the observer |
 | `tests/firmwares/world_rlc_gpio/` | Demo firmware source, linker script, build script |
 | `tests/unit/test_world_plugin.py` | Host-side preprocessor tests |

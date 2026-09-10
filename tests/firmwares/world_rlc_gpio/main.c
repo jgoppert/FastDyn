@@ -6,6 +6,8 @@
  * bound to world virtuals by configs/world_rlc_gpio.toml. The pin drives the
  * RLC circuit's supply voltage, and the analog input samples the capacitor.
  *
+ * The pin toggles continuously, so the firmware never exits.
+ *
  * Build: tests/firmwares/world_rlc_gpio/build.sh
  */
 #include <stdint.h>
@@ -19,13 +21,6 @@ static void sh_write0(const char *text)
     /* Semihosting returns a value in r0, so r0 is an in/out operand. Marking
      * it input-only lets the compiler assume r0 still holds the opcode on a
      * later call, which it does not. */
-    __asm__ volatile("bkpt 0xAB" : "+r"(r0) : "r"(r1) : "memory");
-}
-
-static void sh_exit(void)
-{
-    register int r0 __asm__("r0") = 0x18; /* SYS_EXIT */
-    register int r1 __asm__("r1") = 0x20026; /* ADP_Stopped_ApplicationExit */
     __asm__ volatile("bkpt 0xAB" : "+r"(r0) : "r"(r1) : "memory");
 }
 
@@ -75,18 +70,28 @@ static void delay(volatile uint32_t iterations)
 }
 
 #define SAMPLES_PER_LEVEL 8
-#define TOTAL_LEVELS 4
 #define DELAY_ITERATIONS 30000u
 
+/*
+ * Toggle the pin forever, sampling the capacitor between edges. A continuously
+ * running firmware is the useful shape here: the RLC keeps charging and
+ * discharging so there is always something to watch, and under a
+ * co-simulation master the run lasts exactly as long as the master grants
+ * rather than ending underneath it.
+ *
+ * Stop it with Ctrl-C, or bound it from the master by granting a fixed number
+ * of slices.
+ */
 int main(void)
 {
     char line[96];
     int level = 1;
+    uint32_t sample_index = 0;
 
     sh_write0("world_rlc_gpio: driving an RLC circuit from a GPIO pin\r\n");
     sh_write0("  sample  pin      capacitor\r\n");
 
-    for (int phase = 0; phase < TOTAL_LEVELS; phase++) {
+    for (;;) {
         world_gpio_write(level);
         for (int sample = 0; sample < SAMPLES_PER_LEVEL; sample++) {
             delay(DELAY_ITERATIONS);
@@ -94,7 +99,7 @@ int main(void)
             char *cursor = line;
             *cursor++ = ' ';
             *cursor++ = ' ';
-            cursor = u32_to_dec(cursor, (uint32_t)(phase * SAMPLES_PER_LEVEL + sample), 4);
+            cursor = u32_to_dec(cursor, sample_index++, 4);
             *cursor++ = ' ';
             *cursor++ = ' ';
             *cursor++ = (char)('0' + level);
@@ -110,11 +115,6 @@ int main(void)
             sh_write0(line);
         }
         level = !level;
-    }
-
-    sh_write0("world_rlc_gpio: done\r\n");
-    sh_exit();
-    for (;;) {
     }
 }
 

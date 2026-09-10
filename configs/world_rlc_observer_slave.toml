@@ -5,7 +5,7 @@
 # master decides how far time advances, and world_model's read-only web
 # observer plots the physics as it happens.
 #
-#   Terminal 1:  fastdyn run -c configs/world_rlc_observer.toml -o fastdyn_work_observer
+#   Terminal 1:  fastdyn run -c configs/world_rlc_observer_slave.toml -o fastdyn_work_observer
 #                -> prints "World observer available at http://127.0.0.1:8770"
 #   Terminal 2:  utils/fastdyn_cosim.py /tmp/fastdyn-observer.qmp \
 #                    --slice-ms 5 --slices 40
