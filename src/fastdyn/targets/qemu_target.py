@@ -604,6 +604,7 @@ def build_qemu_cmd(machine, dev_config_path, out_path):
         f"edge_coverage={_bool01(getattr(opts, 'edge_coverage', False))}",
         f"twintrace={twintrace_opt}",
         f"twintrace_binary={replay_binary}",
+        f"exact_budget_stop={_bool01(getattr(opts, 'exact_budget_stop', False))}",
     ]
 
     fuzzing_schema = getattr(opts, "fuzzing_schema", None)

@@ -127,6 +127,9 @@ class QemuTargetOpts:
         self.semihosting_config: str = "enable=on,target=native"
         self.monitor_port: Optional[int] = 5555
         self.qmp_socket: Optional[str] = "/tmp/qmp.sock"
+        # Halt exactly on a co-simulation budget deadline rather than at the
+        # first translation-block boundary after it. See docs/CoSimulationSlave.md.
+        self.exact_budget_stop: bool = False
         self.exit_timeout_ms: int = 5000
         self.icount: Optional[str] = None
         self.timer_irq_period_ns: Optional[int] = None

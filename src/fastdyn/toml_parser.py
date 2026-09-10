@@ -237,6 +237,7 @@ def parser(out_dir, machine_name, toml_config, svd_path, fmu_name=None, load_fmu
         "FASTDYN_GDB_PORT",
         toml_parser.machine_info.get("gdb_port", 1234),
     )
+    q.exact_budget_stop  = toml_parser.machine_info.get("exact_budget_stop", False)
     q.icount             = _format_icount_option(toml_parser.machine_info.get("icount", None))
     q.timer_irq_period_ns = toml_parser.machine_info.get("timer_irq_period_ns", None)
 
