@@ -266,9 +266,49 @@ Generating the metadata rather than hand-writing it keeps world_model's
 artifact format inside world_model. `observer` accepts `true` as shorthand for
 a default table, and requires a `trace` table, since a plot needs a trace.
 
-The observer serves for the lifetime of the run, and shows a **rolling window
-of the last 5000 trace samples** — 500 ms of physics at the demo's 100 µs
-resolution. Two configurations use it, one per co-simulation mode.
+The observer serves for the lifetime of the run and shows a **rolling window of
+the last 5000 trace samples**. world_model traces every communication step and
+rejects any other setting (`[Trace].every_step` must be `true`), so there is no
+decimation and the visible span is simply:
+
+```text
+visible span = 5000 x step_ns
+```
+
+At the physics demo's 100 µs quantum that is only 500 ms. Both observer
+configurations therefore use `step_ns = 1000000`, giving a **5 s** window.
+That costs nothing in accuracy: everything up to a 1 ms step is numerically
+identical for this circuit (see [`step_ns` is a fidelity
+parameter](#step_ns-is-an-integration-step-not-a-scheduling-knob) below —
+measured 4.69 s of visible span with the guest readings unchanged).
+
+To widen it further, raise `step_ns` again — but past 1 ms this circuit starts
+to lose accuracy, and past ~3 ms the integrator diverges.
+
+### The x-axis does not follow the data
+
+Worth knowing before you conclude something is broken. world_model's page
+caches the plot's x range on the first draw, taken from the world's
+`start`/`stop` (which `horizon_ns` sets), and afterwards only ever widens the
+y range:
+
+```js
+function autoView(panel,data){
+  if(!panel._autoView){ /* x fixed here, once */ }
+  else { /* only ymin/ymax are updated */ }
+}
+function fit(panel){panel._view=null;drawPanel(panel)}   // clears zoom, not _autoView
+```
+
+So the data window slides forward while the axis stays put, and "Reset view"
+clears a manual zoom but not the cached range. Set `horizon_ns` to match the
+visible span so the two line up at startup, then pan or zoom with the mouse
+(drag to pan time, wheel to zoom) to follow the run.
+
+Making the view track the newest data is a one-line change upstream —
+`fit()` would also need to clear `panel._autoView` — in `tools/world`.
+
+Two configurations use the observer, one per co-simulation mode.
 
 ### Watch it live: `configs/world_rlc_observer_master.toml`
 

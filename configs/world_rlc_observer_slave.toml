@@ -64,7 +64,11 @@ init_nsvtor = "0x08000000"
 
 [CPU.cpu0.plugins.world]
 enabled = true
-step_ns = 100000
+# The observer plots the last 5000 trace samples, and world_model traces every
+# communication step with no decimation, so the visible span is
+# 5000 * step_ns -- 5 s here, against 0.5 s at a 100 us step. Anything up to
+# 1 ms is numerically identical for this circuit (see docs/WorldPlugin.md).
+step_ns = 1000000
 
 [CPU.cpu0.plugins.world.models.rlc]
 path = "tools/world/examples/rlc/out/RLC.fmu"
@@ -93,9 +97,14 @@ enabled = true
 host = "127.0.0.1"
 port = 8770
 open_browser = false
-# Initial x-axis extent of the plots, in nanoseconds. Cosmetic only: the view
-# auto-fits to whatever data has arrived.
-horizon_ns = 200_000_000
+# Initial x-axis extent of the plots, in nanoseconds. Match it to the visible
+# span (5000 * step_ns) so the axis lines up with the data at startup.
+#
+# The axis does not follow the data afterwards: world_model's page caches the
+# x range on the first draw and only ever widens y, and its "Reset view" clears
+# a manual zoom but not that cached range. Once the run passes this horizon,
+# pan or zoom with the mouse to look at later data.
+horizon_ns = 5_000_000_000
 
 [[CPU.cpu0.plugins.world.pins]]
 at = "world_gpio_write"
