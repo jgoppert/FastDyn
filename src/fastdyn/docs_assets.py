@@ -84,7 +84,7 @@ def repair_reference_links(book, context):
             if not chapter:
                 continue
             path = chapter.get("source_path") or ""
-            if path.startswith("general/") and path not in ("general/overview.md", "general/environment.md", "general/instrumentation.md"):
+            if path in {*pages.values(), "general/running.md", "general/devices.md"}:
                 def replace(match):
                     link = match.group(1)
                     target, separator, fragment = link.partition("#")
@@ -113,6 +113,8 @@ def main():
     context, book = json.load(sys.stdin)
     stage(Path(context["root"]), context["config"]["book"].get("src", "src"), prebuilt)
     repair_reference_links(book, context)
+    from fastdyn.tutorial_examples import decorate
+    decorate(book, context)
     json.dump(book, sys.stdout)
 
 

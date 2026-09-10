@@ -122,6 +122,7 @@ repository's Git submodule and `flake.lock` record its exact revision.
 
 Inside whichever environment you chose:
 
+<!-- fastdyn-check: environment-tools -->
 ```bash
 fastdyn run --help
 fastdyn-config --help

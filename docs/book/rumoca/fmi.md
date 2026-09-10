@@ -126,6 +126,7 @@ conversions in the actual wrapper.
 After [preparing and running the first mission](getting-started.md), save this
 Python code as `out/inspect_fmu.py`:
 
+<!-- fastdyn-check: inspect-fmu-source -->
 ```python
 from fmpy import read_model_description
 
@@ -144,6 +145,7 @@ for variable in model.modelVariables:
 
 Run it from the repository root in your chosen environment:
 
+<!-- fastdyn-check: inspect-fmu-run -->
 ```bash
 python out/inspect_fmu.py
 ```

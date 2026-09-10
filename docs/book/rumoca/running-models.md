@@ -9,6 +9,7 @@ Choose [an environment](../general/environment.md), then generate a config for t
 
 For Rover:
 
+<!-- fastdyn-check: rover-flight -->
 ```bash
 fastdyn-config --base configs/rover462.toml --output out/rover.toml
 fastdyn run -c out/rover.toml -o out/rover/work
@@ -24,6 +25,7 @@ use Copter or Rover for a runnable firmware simulation.
 
 Use the same TOML for compilation and execution:
 
+<!-- fastdyn-check: standalone-fmu -->
 ```bash
 python utils/build_fmi3_fmu.py --config out/copter.toml --skip-submodules
 ```
@@ -35,6 +37,7 @@ its native library on first use and caches it beside the archive.
 
 To compile the current array-based model directly:
 
+<!-- fastdyn-check: direct-compile -->
 ```bash
 rumoca compile modelica/FastDyn/Copter.mo \
   --model FastDyn.Copter \

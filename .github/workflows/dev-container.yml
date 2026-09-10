@@ -15,12 +15,18 @@ concurrency:
 jobs:
   container:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v7
+      - name: Initialize tutorial sources
+        run: |
+          git submodule update --init --depth 1 --jobs 3 \
+            third_party/common/rumoca \
+            third_party/common/modelica_models \
+            third_party/common/cmsis-svd-data
       - uses: nixbuild/nix-quick-install-action@v35
       - uses: nix-community/cache-nix-action@v7
         with:
@@ -41,6 +47,26 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" \
             --volume "$PWD:/workspace" fastdyn-dev:local \
             python utils/configure_nix.py --help
+      - name: Run the tutorial commands from the book
+        timeout-minutes: 25
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --volume "$PWD:/workspace" fastdyn-dev:local \
+            python utils/verify_tutorial.py
+      - name: Upload tutorial checks and mission evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tutorial-verification
+          if-no-files-found: ignore
+          path: |
+            out/tutorial-check/
+            out/**/*.tlog
+            out/**/console.log
+            out/**/results.json
+            out/**/result.json
+            out/**/*.png
+            out/**/*.csv
       - name: Publish to GitHub Container Registry
         if: github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         env:

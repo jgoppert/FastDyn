@@ -13,6 +13,7 @@ current three-wheel model, whose FMI export is still pending compiler support.
 
 ## Copter 4.6.2
 
+<!-- fastdyn-check: inspect-copter-config -->
 ```bash
 fastdyn-config --base configs/copter462.toml --output out/current/copter.toml
 ```
@@ -27,6 +28,7 @@ fastdyn-config --base configs/copter462.toml --output out/current/copter.toml
 
 ## Plane 4.6.2
 
+<!-- fastdyn-check: inspect-plane-config -->
 ```bash
 # Configuration inspection only: Plane FMI contact-event support is pending.
 fastdyn-config --base configs/plane462.toml --output out/current/plane.toml
@@ -42,6 +44,7 @@ fastdyn-config --base configs/plane462.toml --output out/current/plane.toml
 
 ## Rover 4.6.2
 
+<!-- fastdyn-check: inspect-rover-config -->
 ```bash
 fastdyn-config --base configs/rover462.toml --output out/current/rover.toml
 ```

@@ -55,6 +55,7 @@ Select this model with an overlay:
 
 In your chosen environment, type:
 
+<!-- fastdyn-check: qavr-config -->
 ```bash
 fastdyn-config --base configs/copter462.toml \
   --overlay configs/models/qavr.toml --output out/qavr.toml

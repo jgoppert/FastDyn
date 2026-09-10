@@ -112,6 +112,7 @@ controller may lose control before or near that condition.
 
 Use your [chosen environment](../general/environment.md):
 
+<!-- fastdyn-check: payload-reference -->
 ```bash
 fastdyn-config --base configs/copter462.toml \
   --overlay configs/models/qavr-side-payload.toml --output out/payload-base.toml
@@ -177,6 +178,7 @@ directory, and repeat with the same controller.
 
 In your chosen environment, regenerate the plot from the book's saved measurements:
 
+<!-- fastdyn-check: payload-replot -->
 ```bash
 python utils/monte_carlo_report.py \
   --config docs/book/assets/payload-study/runs.toml \
