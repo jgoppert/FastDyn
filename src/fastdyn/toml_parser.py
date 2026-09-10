@@ -202,8 +202,12 @@ def parser(out_dir, machine_name, toml_config, svd_path, fmu_name=None, load_fmu
     if load_fmu:
         try:
             fmu = fmu_build.resolve(Path(toml_config), fmu_name)
+            from .fmu_runtime import prepare
+            runtime = prepare(fmu.fmu_path)
             machine0.fmu_name = fmu.name
-            machine0.fmu_path = str(fmu.fmu_path if fmu.package else fmu.output)
+            machine0.fmu_path = str(runtime.library)
+            machine0.fmu_instantiation_token = runtime.instantiation_token
+            machine0.fmu_resource_path = str(runtime.resources)
             machine0.fmu_parameters = fmu.parameters or {}
             machine0.fmu_value_references = fmu_build.value_references(fmu)
         except fmu_build.NoFmuConfig:
@@ -237,6 +241,7 @@ def parser(out_dir, machine_name, toml_config, svd_path, fmu_name=None, load_fmu
         "FASTDYN_GDB_PORT",
         toml_parser.machine_info.get("gdb_port", 1234),
     )
+    q.exact_budget_stop  = toml_parser.machine_info.get("exact_budget_stop", False)
     q.icount             = _format_icount_option(toml_parser.machine_info.get("icount", None))
     q.timer_irq_period_ns = toml_parser.machine_info.get("timer_irq_period_ns", None)
 

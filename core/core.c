@@ -1311,6 +1311,18 @@ static int core_parse_arguments(int argc, char ** argv) {
         runtime = filename; // Lazy Init
     }
 
+    /*
+     * Co-simulation budget precision. Off by default: the guest halts at the
+     * first translation-block boundary at or after its deadline. When enabled,
+     * QEMU stops synchronously on the deadline instead, so a co-simulation
+     * master sees virtual time land exactly on the budget it granted.
+     */
+    filename = utils_get_arg("exact_budget_stop", argc, argv);
+    if (!arg_is_disabled(filename) &&
+        (strcasecmp(filename, "true") == 0 || strcmp(filename, "1") == 0)) {
+        qemu_plugin_set_budget_exact_stop(true);
+    }
+
 	return 0;
 }
 

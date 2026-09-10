@@ -1,5 +1,28 @@
+diff --git a/include/qemu/qemu-plugin.h b/include/qemu/qemu-plugin.h
+index 2586700e94..9aa6e2ef03 100644
+--- a/include/qemu/qemu-plugin.h
++++ b/include/qemu/qemu-plugin.h
+@@ -255,6 +255,18 @@ void qemu_plugin_vmstate(void);
+ QEMU_PLUGIN_API
+ uint64_t qemu_plugin_wait_for_budget(void);
+ 
++/**
++ * qemu_plugin_set_budget_exact_stop() - halt exactly on the budget deadline
++ * @exact: true to stop the guest precisely on its deadline
++ *
++ * By default the guest halts at the first translation-block boundary at or
++ * after its budget deadline, overshooting by roughly one execution round. When
++ * @exact is true the VM is stopped synchronously from the deadline timer
++ * instead, so virtual time lands exactly on the budget.
++ */
++QEMU_PLUGIN_API
++void qemu_plugin_set_budget_exact_stop(bool exact);
++
+ QEMU_PLUGIN_API
+ void qemu_plugin_register_irq_hook(void (*cb)(int), void (*cb_end)(int));
+ 
 diff --git a/plugins/api.c b/plugins/api.c
-index c2232c2f3d..49202b46d1 100644
+index c2232c2f3d..55df323404 100644
 --- a/plugins/api.c
 +++ b/plugins/api.c
 @@ -49,6 +49,8 @@
@@ -45,8 +68,44 @@ index c2232c2f3d..49202b46d1 100644
  
  void qemu_plugin_pause_vm(void) {
  	qemu_system_vmstop_request(RUN_STATE_PAUSED);
-@@ -114,7 +143,7 @@ void budget_exhausted(void * arg) {
- 	printf("Budgeting time!!\n");
+@@ -104,43 +133,125 @@ typedef struct BudgetControl {
+     QEMUTimer budget_timer;
+ 	QEMUTimerCB * cb;
+ 	RunState vm_old_state;
++	bool exact_stop;
+ } BudgetControl;
+ 
+ extern BudgetControl bc_tcb;
+ 
++/*
++ * Budget tracing is off by default: budget_exhausted() runs on every granted
++ * slice, so unconditional printf() here dominates the output of a
++ * co-simulation master that steps in small increments.  Set
++ * FASTDYN_BUDGET_DEBUG=1 to restore the diagnostics.
++ */
++static bool budget_debug_enabled(void)
++{
++    static int cached = -1;
++
++    if (cached < 0) {
++        const char *raw = getenv("FASTDYN_BUDGET_DEBUG");
++        cached = (raw && raw[0] && strcmp(raw, "0") != 0) ? 1 : 0;
++    }
++    return cached == 1;
++}
++
++#define budget_debug(fmt, ...) \
++    do { \
++        if (budget_debug_enabled()) { \
++            fprintf(stderr, "[budget] " fmt "\n", ##__VA_ARGS__); \
++        } \
++    } while (0)
++
+ void budget_exhausted(void * arg);
+ void budget_exhausted(void * arg) {
+ 	BudgetControl * bc = (BudgetControl *) arg;
+-	printf("Budgeting time!!\n");
++	bool stop_synchronously = false;
  
  	qemu_mutex_lock(&bc->lock);
 -	uint64_t ts = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -54,16 +113,99 @@ index c2232c2f3d..49202b46d1 100644
  	if (ts >= bc->total_budget) {
  		if (runstate_get() != RUN_STATE_PAUSED) {
  			bc->vm_old_state = runstate_get();
-@@ -122,7 +151,7 @@ void budget_exhausted(void * arg) {
- 			printf("Stopping vm at %ld \n", ts);
+-    	    qemu_system_vmstop_request(RUN_STATE_PAUSED);
+-			printf("Stopping vm at %ld \n", ts);
++			/*
++			 * qemu_system_vmstop_request() only raises a flag; the main loop
++			 * pauses the VM when it next checks.  Under icount the vCPU keeps
++			 * retiring instructions until then, and every instruction advances
++			 * virtual time, so the guest halts past its deadline.
++			 *
++			 * In exact mode stop the VM synchronously instead.  This timer
++			 * callback runs on the main loop with icount having already stopped
++			 * the vCPU precisely at the deadline, so pausing here leaves virtual
++			 * time exactly on total_budget.  It is only taken on the main loop:
++			 * from a vCPU thread vm_stop() would just re-request the async stop.
++			 * vm_stop() is called with bc->lock released, because it pauses every
++			 * vCPU and a vCPU blocked on this lock (reachable through the
++			 * start_budgeting virtual) would otherwise deadlock.
++			 */
++			if (bc->exact_stop && qemu_in_main_thread()) {
++				stop_synchronously = true;
++			} else {
++				qemu_system_vmstop_request(RUN_STATE_PAUSED);
++			}
++			budget_debug("stopping vm at %" PRIu64 " ns%s", ts,
++			             stop_synchronously ? " (exact)" : "");
  		}
- 		//Try to account for drift
+-		//Try to account for drift
 -		bc->total_budget = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-+		bc->total_budget = qemu_plugin_get_virtual_time_ns();
++		/*
++		 * The guest stops at a translation-block boundary at or after the
++		 * deadline, so it may overshoot.  Snap the budget forward to the time
++		 * actually reached; a master reconciles using the current_time field
++		 * returned by run-for rather than assuming it received exactly the
++		 * budget it asked for.
++		 */
++		bc->total_budget = ts;
      }
      else {
  		vm_resume(bc->vm_old_state);
-@@ -206,7 +235,7 @@ static void ptimer_callback(void *opaque) {
+-		printf("See you in %ld\n", bc->total_budget);
++		budget_debug("resuming until %" PRIu64 " ns", bc->total_budget);
+         timer_mod_ns(&bc->budget_timer, bc->total_budget); 
+     }
+ 
+ 	qemu_mutex_unlock(&bc->lock);
++
++	if (stop_synchronously) {
++		vm_stop(RUN_STATE_PAUSED);
++	}
+ }
+ 
+-extern void init_budget_system(void);
++extern void budget_system_ensure_init(void);
+ uint64_t qemu_plugin_wait_for_budget(void) {
+-	if (!bc_tcb.budget_init) {
+-		init_budget_system();
+-	}
++	budget_system_ensure_init();
+ 	budget_exhausted(&bc_tcb);
+ 	return 0;
+ }
++
++/* Read the guest's virtual time for the budget/co-simulation interface. */
++uint64_t budget_current_time_ns(void);
++uint64_t budget_current_time_ns(void) {
++	return (uint64_t)qemu_plugin_get_virtual_time_ns();
++}
++
++/* Exact-stop mode: halt precisely on the deadline rather than after it. */
++void budget_set_exact_stop(bool exact);
++void budget_set_exact_stop(bool exact) {
++	budget_system_ensure_init();
++	qemu_mutex_lock(&bc_tcb.lock);
++	bc_tcb.exact_stop = exact;
++	qemu_mutex_unlock(&bc_tcb.lock);
++}
++
++/*
++ * Plugin-facing selection of exact-stop mode.  A plugin configures this from
++ * its own options at install time, so the choice travels with the run's
++ * configuration rather than through the environment.
++ */
++void qemu_plugin_set_budget_exact_stop(bool exact) {
++	budget_set_exact_stop(exact);
++}
++
++bool budget_get_exact_stop(void);
++bool budget_get_exact_stop(void) {
++	return bc_tcb.exact_stop;
++}
+ //Hook to register loader functions.
+ extern void plugin_vmstate_budget(void);
+ void qemu_plugin_vmstate(void) {
+@@ -206,7 +317,7 @@ static void ptimer_callback(void *opaque) {
      }
  
      // Reschedule for next aligned period
@@ -72,7 +214,7 @@ index c2232c2f3d..49202b46d1 100644
  
      // If we're behind, skip missed intervals to stay aligned
  	int missed =-1;
-@@ -229,7 +258,7 @@ uint64_t qemu_plugin_timer_new_period_ns(void (*cb)(void *), void *data, uint64_
+@@ -229,7 +340,7 @@ uint64_t qemu_plugin_timer_new_period_ns(void (*cb)(void *), void *data, uint64_
  		ctx->data = data;
  		ctx->cb =cb;
  		ctx->period_ns = period;
@@ -81,7 +223,7 @@ index c2232c2f3d..49202b46d1 100644
  		timer_mod_ns(ctx->timer, ctx->next_fire_ns);
  	} else {
  		printf("Too many timers requested, i will die now");
-@@ -617,7 +646,7 @@ GArray *qemu_plugin_get_registers(void)
+@@ -617,7 +728,7 @@ GArray *qemu_plugin_get_registers(void)
  
  
  int64_t qemu_plugin_get_virtual_timer(void) {
@@ -90,6 +232,182 @@ index c2232c2f3d..49202b46d1 100644
  }
  
  void raise_irq(CPUState *cs, int irq_num, int secure);
+diff --git a/qapi/qom.json b/qapi/qom.json
+index a25f3b694a..9d91205584 100644
+--- a/qapi/qom.json
++++ b/qapi/qom.json
+@@ -77,12 +77,73 @@
+ ##
+ # @Budget:
+ #
+-# @totalbudget: current_budget
++# @totalbudget: cumulative virtual-time deadline, in nanoseconds, that the
++#     guest has been granted since startup.
++#
++# @currenttime: the guest's virtual time, in nanoseconds, at the moment this
++#     command returned.  `run-for` is asynchronous: it grants budget, resumes
++#     the guest and returns immediately, so the value reported by `run-for`
++#     precedes the slice it just granted.  Wait for the STOP event and then
++#     call `query-budget` to read the time the guest actually reached.  The
++#     guest halts at a translation-block boundary at or after the deadline, so
++#     that value may exceed @totalbudget; a co-simulation master reconciles
++#     against it rather than assuming it received exactly what it requested.
++#
++# @exact: whether exact-stop mode is enabled.  When false (the default) the
++#     guest halts at the first translation-block boundary at or after the
++#     deadline, typically overshooting by a fixed cost of roughly one
++#     execution round.  When true it halts precisely on the deadline, so
++#     @currenttime equals @totalbudget after every slice.
+ #
+ # Since: 1.2
+ ##
+ { 'struct': 'Budget', 
+-  'data': { 'totalbudget': 'uint64' } }
++  'data': { 'totalbudget': 'uint64', 'currenttime': 'uint64', 'exact': 'bool' } }
++
++##
++# @set-budget-mode:
++#
++# Choose how the guest halts when its budget deadline is reached.
++#
++# @exact: true to halt precisely on the deadline.  This stops the VM
++#     synchronously from the deadline timer instead of raising an
++#     asynchronous stop request, which costs a vCPU pause on the main loop but
++#     removes the overshoot entirely.  Off by default, so existing behaviour is
++#     unchanged unless a master asks for it.
++#
++# Returns: the resulting budget state.
++#
++# Since: 1.2
++#
++# .. qmp-example::
++#
++#     -> { "execute": "set-budget-mode", "arguments": { "exact": true } }
++#     <- { "return": { "totalbudget": 0, "currenttime": 0, "exact": true } }
++##
++{ 'command': 'set-budget-mode',
++  'data': { 'exact': 'bool' },
++  'returns': 'Budget',
++  'allow-preconfig': true }
++
++##
++# @query-budget:
++#
++# Report the guest's current virtual time and cumulative budget deadline
++# without granting any further execution.  Intended for a co-simulation master
++# to read the guest's position after a STOP event.
++#
++# Returns: the current budget state.
++#
++# Since: 1.2
++#
++# .. qmp-example::
++#
++#     -> { "execute": "query-budget" }
++#     <- { "return": { "totalbudget": 20000000, "currenttime": 20000512 } }
++##
++{ 'command': 'query-budget',
++  'returns': 'Budget',
++  'allow-preconfig': true }
+ ##
+ # @run-for:
+ #
+diff --git a/qom/qom-qmp-cmds.c b/qom/qom-qmp-cmds.c
+index 979cebd4a3..f4b9885220 100644
+--- a/qom/qom-qmp-cmds.c
++++ b/qom/qom-qmp-cmds.c
+@@ -55,9 +55,13 @@ typedef struct BudgetControl {
+     QEMUTimer budget_timer;
+     QEMUTimerCB * cb;
+ 	RunState vm_old_state;
++	bool exact_stop;
+ } BudgetControl;
+ 
+ extern void budget_exhausted(void *);
++extern uint64_t budget_current_time_ns(void);
++extern void budget_set_exact_stop(bool exact);
++extern bool budget_get_exact_stop(void);
+ BudgetControl bc_tcb;
+ static int bc_tcb_post_load(void *opaque, int version_id)
+ {
+@@ -107,26 +111,73 @@ void init_budget_system(void) {
+         bc_tcb.budget_init = 1;
+         //TODO: Hack read from snaphot maybe.
+         bc_tcb.vm_old_state = RUN_STATE_RUNNING;
++
++}
++
++/*
++ * run-for arrives on the main loop thread while qemu_plugin_wait_for_budget()
++ * runs on a vCPU thread, so a plain `if (!budget_init) init()` could run the
++ * initializer twice and leave two threads with different mutexes.  g_once
++ * makes first use safe from either side.
++ */
++void budget_system_ensure_init(void);
++void budget_system_ensure_init(void) {
++	static gsize initialized;
++
++	if (g_once_init_enter(&initialized)) {
++		init_budget_system();
++		g_once_init_leave(&initialized, 1);
++	}
+ }
+ 
+ Budget *qmp_run_for(uint64_t budget, Error **errp) {
+ 	Budget * total;
+ 
+-	//TODO: Potential race in init
+-	if (!bc_tcb.budget_init) {
+-		init_budget_system();
+-    }
++	budget_system_ensure_init();
+ 
+ 	total = g_new0(Budget, 1);
+ 	qemu_mutex_lock(&bc_tcb.lock);
+ 	bc_tcb.total_budget += budget;
+ 	qemu_mutex_unlock(&bc_tcb.lock);
++
++	/*
++	 * bc_tcb.cb() takes the same lock, so it must be called unlocked. Re-take
++	 * the lock afterwards: the callback may have snapped total_budget forward
++	 * to absorb guest overshoot, and an unlocked read could tear or observe a
++	 * stale value.
++	 */
+ 	bc_tcb.cb(&bc_tcb);
++
++	qemu_mutex_lock(&bc_tcb.lock);
+ 	total->totalbudget = bc_tcb.total_budget;
++	total->currenttime = budget_current_time_ns();
++	total->exact = bc_tcb.exact_stop;
++	qemu_mutex_unlock(&bc_tcb.lock);
+ 
+ 	return total;
+ }
+ 
++Budget *qmp_query_budget(Error **errp) {
++	Budget * state;
++
++	budget_system_ensure_init();
++
++	state = g_new0(Budget, 1);
++	qemu_mutex_lock(&bc_tcb.lock);
++	state->totalbudget = bc_tcb.total_budget;
++	state->currenttime = budget_current_time_ns();
++	state->exact = bc_tcb.exact_stop;
++	qemu_mutex_unlock(&bc_tcb.lock);
++
++	return state;
++}
++
++Budget *qmp_set_budget_mode(bool exact, Error **errp) {
++	budget_system_ensure_init();
++	budget_set_exact_stop(exact);
++	return qmp_query_budget(errp);
++}
++
+ ObjectPropertyInfoList *qmp_qom_list(const char *path, Error **errp)
+ {
+     Object *obj;
 diff --git a/target/arm/tcg/m_helper.c b/target/arm/tcg/m_helper.c
 index f964d5f59e..f69f797531 100644
 --- a/target/arm/tcg/m_helper.c
