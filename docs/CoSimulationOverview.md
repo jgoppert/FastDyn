@@ -303,6 +303,35 @@ Opt in with `[Machine] exact_budget_stop = true`, needing no change to the
 master, or at runtime with the `set-budget-mode` QMP command. Off by default.
 No measurable wall-clock cost, and guest output is byte-identical either way.
 
+## Slide: Lockstep is where exact stops pay off
+
+`utils/cosim_lockstep.py` grants every guest the same slice, waits for all of
+them, and only then proceeds — one logical clock across N FastDyn instances.
+The loop boundary is where a shared model, message router or radio channel
+would exchange data.
+
+```text
+ round         guest 0         guest 1  spread(ns)
+     0        20000000        20000000           0
+     3        80000000        80000000           0
+     5       120000000       120000000           0
+final virtual times agree exactly
+```
+
+With `exact_budget_stop = false` the same run drifts, because each guest
+overshoots independently:
+
+```text
+     2        60075968        60094208       18240
+     5       120048224       120098464       50240
+final virtual times differ
+```
+
+A conservative master can absorb that with a guard band, but the guests cannot
+exchange data at a common instant. This is the concrete argument for exact
+stops, and the reason slave mode is the more promising direction for coupled
+swarm work than a richer single node.
+
 ## Slide: What determinism does and does not hold
 
 Two measured properties, and the distinction matters.
@@ -376,7 +405,9 @@ already in the fork.
 | `tests/firmwares/world_rlc_gpio/` | Demo firmware and build script |
 | `utils/fastdyn_cosim.py` | Co-simulation master client and CLI |
 | `tests/unit/test_world_plugin.py` | 12 preprocessor tests |
-| `tests/unit/test_fastdyn_cosim.py` | 8 protocol tests against a fake QMP server |
+| `tests/unit/test_fastdyn_cosim.py` | 11 protocol tests against a fake QMP server |
+| `utils/cosim_lockstep.py` | Multi-instance lockstep example |
+| `tests/integration/run_cosim_slave_smoke.sh` | End-to-end slave-mode verification |
 | `patches/qemu-fastdyn-plugin-icount.patch` | Budget interface fixes |
 
 Changes to pre-existing tracked files: one line in `virtuals/meson.build`, and

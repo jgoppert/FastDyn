@@ -160,18 +160,35 @@ class BudgetMaster:
     def status(self) -> str:
         return self._command("query-status")["status"]
 
-    def run_slice(self, duration_ns: int) -> int:
-        """Grant `duration_ns` of virtual time and block until the guest stops.
+    def grant(self, duration_ns: int) -> int:
+        """Grant `duration_ns` of virtual time without waiting for the guest.
 
-        Returns the virtual time actually reached, which may exceed the
-        deadline by less than one translation block.
+        `run-for` is asynchronous, so this returns while the guest is still
+        running. Pair it with wait_for_slice(). Granting to several guests
+        before waiting on any of them is how a master keeps them in lockstep.
+
+        Returns the new cumulative deadline.
         """
         if duration_ns <= 0:
             raise ValueError("slice duration must be positive")
-        self._command("run-for", budget=duration_ns)
+        result = self._command("run-for", budget=duration_ns)
+        return int(result["totalbudget"])
+
+    def wait_for_slice(self) -> int:
+        """Block until the guest halts, then report the virtual time reached."""
         self._wait_for_event("STOP", self.slice_timeout)
         self._refresh()
         return self.time_ns
+
+    def run_slice(self, duration_ns: int) -> int:
+        """Grant `duration_ns` of virtual time and block until the guest stops.
+
+        Returns the virtual time actually reached. With exact-stop mode off
+        this may exceed the deadline by less than one translation block; with
+        it on the two are equal.
+        """
+        self.grant(duration_ns)
+        return self.wait_for_slice()
 
 
 def main() -> int:
