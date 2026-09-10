@@ -243,3 +243,46 @@ def test_derived_world_toml_carries_absolute_fmu_paths(tmp_path):
     # FastDyn owns the observer's lifetime, so the generator must not start it.
     assert "launch_on_generate = false" in text
     assert "enabled = true" in text
+
+
+def _world_preprocessor():
+    """The registered instance, so the module is not imported a second time."""
+    from fastdyn.virtual_preprocessing import RUN_PREPROCESSORS, _load_run_plugins
+    if "world" not in RUN_PREPROCESSORS:
+        _load_run_plugins()
+    return RUN_PREPROCESSORS["world"].prepare
+
+
+def test_runtime_absence_check_warns_when_nothing_was_written(tmp_path, caplog):
+    """A plugin built without the world runtime leaves every artifact empty."""
+    import logging
+
+    log = tmp_path / "runtime.log"
+    log.write_text("")                     # created by the preprocessor, never written
+    trace = tmp_path / "trace.csv"         # the runtime never created it
+
+    class _Ctx:
+        logger = logging.getLogger("test.world")
+
+    check = _world_preprocessor()._runtime_absence_check(_Ctx(), log, trace)
+    with caplog.at_level(logging.WARNING, logger="test.world"):
+        check()
+    assert "its runtime never ran" in caplog.text
+    assert "rebuild FastDyn" in caplog.text
+
+
+def test_runtime_absence_check_is_quiet_when_the_runtime_ran(tmp_path, caplog):
+    import logging
+
+    log = tmp_path / "runtime.log"
+    log.write_text("0 ns | world | info | fmu | loaded\n")
+    trace = tmp_path / "trace.csv"
+    trace.write_text("time_ns,rlc.current\n0,0\n")
+
+    class _Ctx:
+        logger = logging.getLogger("test.world")
+
+    check = _world_preprocessor()._runtime_absence_check(_Ctx(), log, trace)
+    with caplog.at_level(logging.WARNING, logger="test.world"):
+        check()
+    assert caplog.text == ""

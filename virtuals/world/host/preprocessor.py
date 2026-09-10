@@ -266,6 +266,7 @@ class WorldRunPreprocessor:
         artifacts.insert(0, manifest)
 
         cleanup: list[Callable[[], None]] = []
+        cleanup.append(self._runtime_absence_check(ctx, log_path, trace_path))
         observer_artifacts = self._observer(
             ctx, settings, resolved_models, endpoint_specs, _table(settings, "connections"),
             step_ns, trace_path, trace_variables, log_path, cleanup,
@@ -277,6 +278,35 @@ class WorldRunPreprocessor:
             len(models), len(endpoints), len(virtuals), step_ns,
         )
         return RunPrepareResult(virtuals=virtuals, artifacts=artifacts, cleanup=cleanup)
+
+    @staticmethod
+    def _runtime_absence_check(ctx, log_path: Path, trace_path: Path | None):
+        """Report a plugin that was configured but never ran.
+
+        The native half of this plugin compiles in only when tools/world is
+        built, and the host half cannot tell: FastDyn deliberately does not
+        expose the plugin library to a preprocessor, and machine capabilities
+        are not populated. So a plugin binary built without the world runtime
+        leaves the manifest unread and every artifact empty, with nothing said
+        about it. Checking after the run turns that into a clear diagnostic.
+        """
+        def check() -> None:
+            wrote_log = log_path.exists() and log_path.stat().st_size > 0
+            wrote_trace = (
+                trace_path is not None
+                and trace_path.exists()
+                and trace_path.stat().st_size > 0
+            )
+            if wrote_log or wrote_trace:
+                return
+            ctx.logger.warning(
+                "world was configured but its runtime never ran: no trace or log was "
+                "written. The plugin library this run loaded was almost certainly built "
+                "without the world runtime. Build tools/world first, then rebuild "
+                "FastDyn (meson decides at configure time whether to compile the "
+                "plugin in): cmake --build tools/world/build && make qemu_path=<...>"
+            )
+        return check
 
     def _observer(self, ctx, settings, models, endpoint_specs, connections,
                   step_ns, trace_path, trace_variables, log_path, cleanup) -> list[Path]:
@@ -319,6 +349,15 @@ class WorldRunPreprocessor:
         server, url = start_observer(WORLD_ROOT, out_dir)
         cleanup.append(lambda: (server.shutdown(), server.server_close()))
         ctx.logger.info("World observer available at %s", url)
+        # The native half of this plugin compiles in only when tools/world was
+        # built before FastDyn. If it is missing, everything host-side still
+        # works -- including this observer -- and the page simply never leaves
+        # "waiting for trace". Say so here rather than leaving it a mystery.
+        ctx.logger.info(
+            "the page stays on 'waiting for trace' until the run logs "
+            "'world ready'; if that never appears, the plugin was built without "
+            "the world runtime -- build tools/world, then rebuild FastDyn"
+        )
         return [world_toml, manifest, out_dir / "ui_config.json"]
 
     def _pins(
