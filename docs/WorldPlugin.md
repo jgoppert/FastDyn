@@ -156,6 +156,62 @@ initialization and at every internal communication point — far finer than the
 firmware's own sampling, which is the point: it records what the physics did
 between observations.
 
+## Watching the physics: world_model's observer
+
+world_model ships a read-only web observer that plots a trace alongside the
+model metadata. Enable it from the plugin table:
+
+```toml
+[CPU.cpu0.plugins.world.trace]
+output = "rlc_trace.csv"
+variables = ["rlc.voltage", "rlc.output_voltage", "rlc.current"]
+
+[CPU.cpu0.plugins.world.observer]
+enabled = true
+host = "127.0.0.1"
+port = 8770
+open_browser = false
+horizon_ns = 200_000_000   # initial x-axis extent; cosmetic, the view auto-fits
+```
+
+FastDyn derives a world TOML from the `models`, `endpoints`, `connections` and
+`trace` tables, runs world_model's own generator on it to produce
+`world_manifest.json` and `ui_config.json`, and serves them for the lifetime of
+the run:
+
+```text
+World observer available at http://127.0.0.1:8770
+```
+
+The page plots the traced series, lists every physical variable with its
+causality and unit, and shows the runtime log. It **only reads artifacts** — it
+cannot advance or steer the world, which is correct here, because the guest
+decides when physics advances.
+
+Generating the metadata rather than hand-writing it keeps world_model's
+artifact format inside world_model. `observer` accepts `true` as shorthand for
+a default table, and requires a `trace` table, since a plot needs a trace.
+
+### Pair it with slave mode
+
+The observer lives for the length of the run, and this demo firmware finishes
+in about a second — too fast to watch. `configs/world_rlc_observer.toml`
+therefore combines the observer with [slave mode](CoSimulationSlave.md), so a
+master paces the guest and you watch the curves extend one slice at a time:
+
+```bash
+# Terminal 1: the guest starts paused, with the observer already serving.
+fastdyn run -c configs/world_rlc_observer.toml -o fastdyn_work_observer
+
+# Terminal 2: open http://127.0.0.1:8770, then grant time in small steps.
+utils/fastdyn_cosim.py /tmp/fastdyn-observer.qmp --slice-ms 5 --slices 40
+```
+
+Before the first slice the trace holds a single row — the sample at time zero —
+because nothing has run. After 20 slices of 5 ms it holds 984 rows across
+`time_ns`, `rlc.voltage`, `rlc.output_voltage` and `rlc.current`. The physics
+advances only when the master says so, and the plot shows exactly that.
+
 ## How firmware exposes a pin
 
 A pin needs a stable instruction to trigger on, and for `analog_in` the
@@ -314,6 +370,8 @@ The plugin follows [WritingVirtuals.md](WritingVirtuals.md):
 | `virtuals/world/runtime/world_plugin.c` | World construction and the two callbacks |
 | `virtuals/world/meson.build` | Detects a built `tools/world` and links `libworld_model` |
 | `configs/world_rlc_gpio.toml` | The single demonstration configuration |
+| `configs/world_rlc_observer.toml` | The same world with the web observer, paced by a master |
+| `virtuals/world/host/observer.py` | Derives the world TOML, generates metadata, serves the observer |
 | `tests/firmwares/world_rlc_gpio/` | Demo firmware source, linker script, build script |
 | `tests/unit/test_world_plugin.py` | Host-side preprocessor tests |
 | `tools/world/` | The standalone world_model runtime |

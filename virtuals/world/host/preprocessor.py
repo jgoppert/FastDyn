@@ -9,6 +9,7 @@ the physical world it is wired to.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
@@ -24,6 +25,16 @@ from fastdyn.virtual_preprocessing import (
     register_run_preprocessor,
     register_virtual,
 )
+
+from .observer import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    generate_artifacts,
+    start_observer,
+    write_world_toml,
+)
+
+WORLD_ROOT = Path(__file__).resolve().parents[3] / "tools" / "world"
 
 DEFAULT_STEP_NS = 100_000
 PIN_KINDS = ("digital_out", "analog_in")
@@ -167,17 +178,26 @@ class WorldRunPreprocessor:
 
         lines: list[str] = [f"step_ns\t{step_ns}"]
 
+        # Resolve FMU paths once. Both the runtime manifest and the observer's
+        # generated world TOML need the absolute path: the latter is written to
+        # a different directory, so a relative path would not resolve there.
+        resolved_models: dict[str, dict] = {}
         for name, model in models.items():
             if not isinstance(model, dict):
                 raise VirtualPreparationError(
                     f"[CPU.cpu0.plugins.world.models.{name}] must be a table"
                 )
-            lines.append(f"model\t{name}\t{_resolve_fmu(model.get('path'), name)}")
-
-        for name, model in models.items():
+            fmu = _resolve_fmu(model.get("path"), name)
+            parameters = {}
             for parameter, value in _table(model, "parameters").items():
                 where = f"[CPU.cpu0.plugins.world.models.{name}.parameters].{parameter}"
-                lines.append(f"param\t{name}\t{parameter}\t{_float(value, where)!r}")
+                parameters[parameter] = _float(value, where)
+            resolved_models[name] = {"path": str(fmu), "parameters": parameters}
+            lines.append(f"model\t{name}\t{fmu}")
+
+        for name, model in resolved_models.items():
+            for parameter, value in model["parameters"].items():
+                lines.append(f"param\t{name}\t{parameter}\t{value!r}")
 
         for source, target in _table(settings, "connections").items():
             if not isinstance(target, str):
@@ -186,7 +206,7 @@ class WorldRunPreprocessor:
                 )
             lines.append(f"connect\t{source}\t{target}")
 
-        endpoint_directions: dict[str, str] = {}
+        endpoint_specs: dict[str, dict] = {}
         for alias, spec in endpoints.items():
             if not isinstance(spec, dict):
                 raise VirtualPreparationError(
@@ -209,11 +229,13 @@ class WorldRunPreprocessor:
                     f"world endpoint {alias!r} targets unknown model {model_name!r}; "
                     f"known models: {', '.join(sorted(models)) or 'none'}"
                 )
-            endpoint_directions[alias] = direction
+            endpoint_specs[alias] = {"target": target, "direction": direction}
             lines.append(f"endpoint\t{alias}\t{model_name}\t{variable}\t{direction}")
 
         trace = _table(settings, "trace")
         artifacts = []
+        trace_path = None
+        trace_variables: list[str] = []
         if trace:
             output = trace.get("output")
             if not isinstance(output, str) or not output:
@@ -227,20 +249,70 @@ class WorldRunPreprocessor:
                     raise VirtualPreparationError(
                         "[CPU.cpu0.plugins.world.trace].variables must be endpoint strings"
                     )
+                trace_variables.append(variable)
                 lines.append(f"trace_var\t{variable}")
             artifacts.append(trace_path)
 
-        virtuals = self._pins(ctx, settings, endpoint_directions)
+        virtuals = self._pins(ctx, settings, {a: s["direction"] for a, s in endpoint_specs.items()})
 
         manifest = ctx.plugin_artifact_path("world.manifest")
         manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
         artifacts.insert(0, manifest)
 
+        cleanup: list[Callable[[], None]] = []
+        observer_artifacts = self._observer(
+            ctx, settings, resolved_models, endpoint_specs, _table(settings, "connections"),
+            step_ns, trace_path, trace_variables, cleanup,
+        )
+        artifacts.extend(observer_artifacts)
+
         ctx.logger.info(
             "world configured %d model(s), %d endpoint(s), %d pin(s) at %d ns step",
             len(models), len(endpoints), len(virtuals), step_ns,
         )
-        return RunPrepareResult(virtuals=virtuals, artifacts=artifacts)
+        return RunPrepareResult(virtuals=virtuals, artifacts=artifacts, cleanup=cleanup)
+
+    def _observer(self, ctx, settings, models, endpoint_specs, connections,
+                  step_ns, trace_path, trace_variables, cleanup) -> list[Path]:
+        """Optionally serve world_model's read-only observer for this run."""
+        config = settings.get("observer", False)
+        if isinstance(config, bool):
+            if not config:
+                return []
+            host, port, open_browser, stop_ns = DEFAULT_HOST, DEFAULT_PORT, False, 0
+        elif isinstance(config, dict):
+            if not bool(config.get("enabled", True)):
+                return []
+            host = str(config.get("host", DEFAULT_HOST))
+            port = int(config.get("port", DEFAULT_PORT))
+            open_browser = bool(config.get("open_browser", False))
+            stop_ns = int(config.get("horizon_ns", 0))
+        else:
+            raise VirtualPreparationError(
+                "[CPU.cpu0.plugins.world].observer must be a boolean or a table"
+            )
+
+        if trace_path is None:
+            raise VirtualPreparationError(
+                "the world observer plots a trace, so it needs a "
+                "[CPU.cpu0.plugins.world.trace] table with an output file"
+            )
+
+        world_toml = ctx.plugin_artifact_path("observer/world.toml")
+        out_dir = world_toml.parent / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_world_toml(
+            world_toml,
+            models=models, endpoints=endpoint_specs, connections=connections,
+            step_ns=step_ns, stop_ns=stop_ns or step_ns * 2000,
+            trace_output=trace_path, trace_variables=trace_variables,
+            host=host, port=port, open_browser=open_browser,
+        )
+        manifest = generate_artifacts(WORLD_ROOT, world_toml, out_dir)
+        server, url = start_observer(WORLD_ROOT, out_dir)
+        cleanup.append(lambda: (server.shutdown(), server.server_close()))
+        ctx.logger.info("World observer available at %s", url)
+        return [world_toml, manifest, out_dir / "ui_config.json"]
 
     def _pins(
         self,

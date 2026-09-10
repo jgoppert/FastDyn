@@ -1,0 +1,113 @@
+# ============================================================================
+# Watch an FMI 3 RLC circuit while a master paces the firmware.
+#
+# Combines the two co-simulation pieces: the guest is a slave, so an external
+# master decides how far time advances, and world_model's read-only web
+# observer plots the physics as it happens.
+#
+#   Terminal 1:  fastdyn run -c configs/world_rlc_observer.toml -o fastdyn_work_observer
+#                -> prints "World observer available at http://127.0.0.1:8770"
+#   Terminal 2:  utils/fastdyn_cosim.py /tmp/fastdyn-observer.qmp \
+#                    --slice-ms 5 --slices 40
+#
+# Open the URL first. The plots are empty because the guest is paused and no
+# physics has run. Each granted slice extends the curves, so you can watch the
+# capacitor charge and discharge one step at a time.
+#
+# Slave mode is what makes the observer usable here: without a master the demo
+# firmware finishes in about a second and the observer exits with the run.
+# See docs/CoSimulationSlave.md and docs/WorldPlugin.md.
+# ============================================================================
+
+[Machine]
+platform = "generic-cortexm"
+qemu_path = "qemu/build/qemu-system-arm"
+display = "none"
+monitor_port = 0
+# The master drives the guest through this socket.
+qmp_socket = "/tmp/fastdyn-observer.qmp"
+# Start paused: the guest executes nothing until the master grants budget.
+stop_on_start = true
+log_options = "none"
+reset_memory_files = true
+semihosting = true
+semihosting_config = "enable=on,target=native"
+# Budget deadlines are virtual-time deadlines. icount makes virtual time a
+# deterministic function of instructions retired, so identical slice sequences
+# reproduce identical guest execution.
+icount = { shift = 5, sleep = false, align = false }
+# Halt exactly on each granted deadline instead of at the first translation
+# block boundary after it. Off by default; costs a synchronous vCPU pause per
+# slice and removes the ~150 us overshoot entirely.
+exact_budget_stop = true
+
+[Device]
+[Device.Models]
+
+[Memory.main]
+id = "ram0"
+base_address = "0x20000000"
+memory_size = "8M"
+memory_type = "SRAM"
+backend = "file"
+memory_file = "/tmp/fastdyn-observer.ram"
+share = true
+
+[CPU]
+[[CPU.cpu0]]
+arch = "arm"
+machine = "cortexm"
+cpu = "cortex-m3"
+binary = "tests/binaries/world_rlc_gpio/world_rlc_gpio.elf"
+plugin_library = "build/libfastdyn.so"
+init_nsvtor = "0x08000000"
+
+[CPU.cpu0.plugins.world]
+enabled = true
+step_ns = 100000
+
+[CPU.cpu0.plugins.world.models.rlc]
+path = "tools/world/examples/rlc/out/RLC.fmu"
+
+[CPU.cpu0.plugins.world.endpoints]
+supply = { target = "rlc.voltage", direction = "in" }
+vcap = { target = "rlc.output_voltage", direction = "out" }
+current = { target = "rlc.current", direction = "out" }
+
+[CPU.cpu0.plugins.world.trace]
+output = "rlc_trace.csv"
+# The observer plots exactly these series, each in a stable colour.
+variables = ["rlc.voltage", "rlc.output_voltage", "rlc.current"]
+
+# ---------------------------------------------------------------------------
+# world_model's read-only web observer.
+#
+# FastDyn derives a world TOML from the tables above, runs world_model's own
+# generator to produce the observer's metadata, and serves it for the lifetime
+# of the run. The observer only reads artifacts: it plots the trace and cannot
+# control the world, which is right, because here the master decides when
+# physics advances.
+# ---------------------------------------------------------------------------
+[CPU.cpu0.plugins.world.observer]
+enabled = true
+host = "127.0.0.1"
+port = 8770
+open_browser = false
+# Initial x-axis extent of the plots, in nanoseconds. Cosmetic only: the view
+# auto-fits to whatever data has arrived.
+horizon_ns = 200_000_000
+
+[[CPU.cpu0.plugins.world.pins]]
+at = "world_gpio_write"
+kind = "digital_out"
+endpoint = "supply"
+register = "r0"
+low = 0.0
+high = 3.3
+
+[[CPU.cpu0.plugins.world.pins]]
+at = "world_adc_read"
+kind = "analog_in"
+endpoint = "vcap"
+register = "r0"
+scale = 1000.0

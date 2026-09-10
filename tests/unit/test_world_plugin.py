@@ -186,3 +186,58 @@ def test_unknown_symbol_lists_candidates(tmp_path):
     ]
     with pytest.raises(VirtualPreparationError, match="Known symbols include"):
         _prepare(tmp_path, settings, binary=str(DEMO_ELF))
+
+
+def test_observer_requires_a_trace_to_plot(tmp_path):
+    settings = _settings(tmp_path)
+    settings["observer"] = True
+    with pytest.raises(VirtualPreparationError, match="needs a .*trace"):
+        _prepare(tmp_path, settings)
+
+
+def test_observer_rejects_a_non_table_non_boolean(tmp_path):
+    settings = _settings(tmp_path)
+    settings["observer"] = "yes"
+    with pytest.raises(VirtualPreparationError, match="must be a boolean or a table"):
+        _prepare(tmp_path, settings)
+
+
+def test_observer_disabled_starts_nothing(tmp_path):
+    settings = _settings(tmp_path)
+    settings["observer"] = {"enabled": False}
+    settings["trace"] = {"output": "trace.csv"}
+    machine, _cpu = _prepare(tmp_path, settings)
+    assert not (tmp_path / "run-artifacts" / "world" / "observer").exists()
+
+
+def test_derived_world_toml_carries_absolute_fmu_paths(tmp_path):
+    """The observer's TOML lives in a different directory, so a relative
+    FMU path in the plugin table would not resolve from there."""
+    from virtuals.world.host.observer import write_world_toml
+
+    destination = tmp_path / "world.toml"
+    write_world_toml(
+        destination,
+        models={"rlc": {"path": "/abs/RLC.fmu", "parameters": {"resistance": 10.0}}},
+        endpoints={
+            "supply": {"target": "rlc.voltage", "direction": "in"},
+            "vcap": {"target": "rlc.output_voltage", "direction": "out"},
+        },
+        connections={},
+        step_ns=100000,
+        stop_ns=200000000,
+        trace_output=tmp_path / "trace.csv",
+        trace_variables=["rlc.output_voltage"],
+        host="127.0.0.1",
+        port=8770,
+        open_browser=False,
+    )
+    text = destination.read_text()
+    assert 'path = "/abs/RLC.fmu"' in text
+    assert 'supply = "rlc.voltage"' in text          # [World.Inputs]
+    assert 'vcap = "rlc.output_voltage"' in text      # [World.Outputs]
+    assert "resistance = 10.0" in text
+    assert f'output = "{tmp_path / "trace.csv"}"' in text
+    # FastDyn owns the observer's lifetime, so the generator must not start it.
+    assert "launch_on_generate = false" in text
+    assert "enabled = true" in text

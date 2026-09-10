@@ -213,7 +213,26 @@ Each guest overshoots independently, so at every boundary they disagree about
 what time it is — by up to 50 µs here. A conservative master can absorb that
 with a guard band, but the guests cannot exchange data at a common instant.
 
-### 5. Handing over after boot instead of at reset
+### 5. Watching the physics while you pace it
+
+`configs/world_rlc_observer.toml` adds world_model's read-only web observer to
+the slave configuration. The observer serves for the lifetime of the run, so
+the guest being paused is what makes it useful: open the page, then grant time
+in small steps and watch the curves extend.
+
+```bash
+# Terminal 1: prints "World observer available at http://127.0.0.1:8770"
+fastdyn run -c configs/world_rlc_observer.toml -o fastdyn_work_observer
+
+# Terminal 2
+utils/fastdyn_cosim.py /tmp/fastdyn-observer.qmp --slice-ms 5 --slices 40
+```
+
+Before the first slice the trace holds one row, the sample at time zero. After
+20 slices of 5 ms it holds 984. See [WorldPlugin.md](WorldPlugin.md) for the
+observer's configuration.
+
+### 6. Handing over after boot instead of at reset
 
 Not recommended — see [Starting mid-execution](#starting-mid-execution) — but
 the mechanism exists. Drop `stop_on_start` and place the `start_budgeting`
@@ -528,6 +547,7 @@ interface. `patches/qemu-fastdyn-plugin-icount.patch` now also carries:
 | `utils/fastdyn_cosim.py` | Master client library and CLI |
 | `utils/cosim_lockstep.py` | Multi-instance lockstep example |
 | `configs/cosim_slave.toml` | Slave-mode demonstration configuration |
+| `configs/world_rlc_observer.toml` | Slave mode plus world_model's web observer |
 | `tests/integration/run_cosim_slave_smoke.sh` | End-to-end verification of all three behaviours |
 | `tests/unit/test_fastdyn_cosim.py` | Protocol tests against a scripted fake QMP server |
 | `core/core.c` | Consumes `exact_budget_stop` and calls the plugin API |
