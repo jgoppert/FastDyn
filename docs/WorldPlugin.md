@@ -27,7 +27,10 @@ guest registers       what the firmware sees
 ## Run the demonstration
 
 ```bash
-# 1. Build world_model and the RLC demonstration FMU.
+# 1. Fetch and build world_model and the RLC demonstration FMU.
+#    tools/world is a submodule and is not fetched by `make`, because the
+#    plugin is optional.
+git submodule update --init tools/world
 python3 -m venv tools/world/venv
 tools/world/venv/bin/pip install -e tools/world
 cmake -S tools/world -B tools/world/build -DWM_BUILD_TESTS=ON
