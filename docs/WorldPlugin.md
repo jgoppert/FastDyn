@@ -39,9 +39,11 @@ cmake --build tools/world/build
 # 2. Build the demo firmware.
 tests/firmwares/world_rlc_gpio/build.sh
 
-# 3. Build FastDyn. The plugin compiles itself in when step 1 has produced
-#    tools/world/build/libworld_model.so, and is skipped otherwise; it needs
-#    no build flag.
+# 3. Build FastDyn -- AFTER step 1. The plugin compiles itself in when
+#    tools/world/build/libworld_model.so exists and is skipped otherwise, and
+#    meson decides that at configure time: a plugin library built before
+#    tools/world existed silently omits the runtime. Keep your usual feature
+#    flags; the plugin needs none of its own.
 make qemu_path=<path/to/qemu>
 
 # 4. Run.
@@ -192,6 +194,30 @@ The page plots the traced series, lists every physical variable with its
 causality and unit, shows the runtime log, and lists physical events. It
 **only reads artifacts** — it cannot advance or steer the world, which is
 correct here, because the guest decides when physics advances.
+
+### If the page never leaves "waiting for trace"
+
+The host half of this plugin runs whether or not the native half was compiled
+in: the observer starts, the metadata is generated, the paths are correct --
+and nothing writes the trace or the log. That presents as a broken observer
+rather than a missing plugin.
+
+The tell is in the run's own output. A healthy run logs both of these:
+
+```text
+World observer available at http://127.0.0.1:8770
+world ready: 1 model(s), 3 endpoint(s), 100000 ns step
+```
+
+If `world ready` never appears, the plugin library that run loaded was built
+without the world runtime. Build `tools/world` first, then rebuild FastDyn.
+
+A second, unmistakable symptom is the guest printing `3735928559 mV`, which is
+`0xDEADBEEF`: with no virtual to write the register, the naked stub returns
+whatever the previous semihosting call left in `r0`.
+
+FastDyn also warns outright after a run that wrote neither trace nor log,
+though a continuously-running demo only reaches that on exit.
 
 ### The runtime log and physical events
 

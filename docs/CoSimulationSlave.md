@@ -57,8 +57,9 @@ cmake --build tools/world/build
 # 3. The demo firmware.
 tests/firmwares/world_rlc_gpio/build.sh
 
-# 4. The FastDyn plugin. exact_budget_stop is passed through it, so it must be
-#    rebuilt against the patched QEMU headers.
+# 4. The FastDyn plugin, AFTER steps 1 and 2. exact_budget_stop is passed
+#    through it, so it must be rebuilt against the patched QEMU headers, and
+#    meson decides at configure time whether to compile the world runtime in.
 make qemu_path=<path/to>/qemu
 
 # 5. Make the runtime libraries discoverable.
