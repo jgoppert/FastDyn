@@ -1,0 +1,120 @@
+# Code comes from the marked Markdown blocks, never a second copy of commands.
+[execution]
+output = "out/tutorial-check"
+timeout_s = 360
+
+[[steps]]
+id = "environment-tools"
+contains = ["rumoca 0.10.0", "Python dependencies available"]
+
+[[steps]]
+id = "copter-config"
+contains = ["Created out/copter.toml"]
+artifacts = ["out/copter.toml"]
+
+[[steps]]
+id = "copter-flight"
+contains = ["final landing confirmed near ground"]
+artifacts = ["out/copter/mission.tlog", "out/fmi3/Copter/FastDyn_Copter.fmu"]
+
+[[steps]]
+id = "copter-report"
+artifacts = ["out/copter-summary.png", "out/copter-summary.csv"]
+
+[[steps]]
+id = "inspect-fmu-source"
+write = "out/inspect_fmu.py"
+
+[[steps]]
+id = "inspect-fmu-run"
+contains = ["FMI version: 3.0", "Co-Simulation: True", "Scheduled Execution: False"]
+
+[[steps]]
+id = "qavr-dae"
+artifacts = ["out/qavr-dae.json"]
+
+[[steps]]
+id = "qavr-config"
+contains = ["Created out/qavr.toml"]
+artifacts = ["out/qavr.toml"]
+
+[[steps]]
+id = "tuning-comparison"
+timeout_s = 900
+contains = ['"default": {"passed": true', '"qav250": {"passed": true']
+artifacts = ["out/tuning/results.json", "out/tuning/default/attitude.csv", "out/tuning/qav250/attitude.csv"]
+
+[[steps]]
+id = "tuning-validation"
+timeout_s = 600
+contains = ['"qav250": {"passed": true']
+artifacts = ["out/tuning-validation/results.json", "out/tuning-response.png"]
+
+[[steps]]
+id = "qavr-flight"
+contains = ["Wrote out/qavr-controller.param (27 parameters)", "final landing confirmed near ground"]
+artifacts = ["out/qavr-controller.param", "out/qavr/mission.tlog"]
+
+[[steps]]
+id = "payload-config"
+contains = ["Created out/payload.toml"]
+artifacts = ["out/payload.toml"]
+
+[[steps]]
+id = "payload-flight"
+contains = ["final landing confirmed near ground"]
+artifacts = ["out/payload/mission.tlog"]
+
+[[steps]]
+id = "load-copy"
+
+[[steps]]
+id = "load-model"
+write = "modelica/FastDyn/MyLoad.mo"
+
+[[steps]]
+id = "load-overlay"
+write = "out/my-load.toml"
+
+[[steps]]
+id = "load-flight"
+contains = ["world-down force 0.735 N", "world-down force 0.245 N", "final landing confirmed near ground"]
+artifacts = ["out/fmi3/MyLoad/FastDyn_MyLoad.fmu", "out/my-load-run/mission.tlog"]
+
+[[steps]]
+id = "payload-reference"
+contains = ["reference — Final mission item and landing confirmed"]
+artifacts = ["out/payload-experiment/reference/result.json", "out/payload-experiment/report/trajectories.png"]
+
+[[steps]]
+id = "payload-replot"
+contains = ['"runs": 18', '"trajectories": 18']
+artifacts = ["out/payload-replot/trajectories.png", "out/payload-replot/trajectories.json"]
+
+[[steps]]
+id = "recorded-reports"
+artifacts = ["out/reports/copter.png", "out/reports/plane.png", "out/reports/rover.png"]
+
+[[steps]]
+id = "rover-flight"
+contains = ["final waypoint reached"]
+artifacts = ["out/rover/mission.tlog"]
+
+[[steps]]
+id = "standalone-fmu"
+
+[[steps]]
+id = "direct-compile"
+artifacts = ["out/manual/Copter/FastDyn_Copter.fmu"]
+
+[[steps]]
+id = "inspect-copter-config"
+artifacts = ["out/current/copter.toml"]
+
+[[steps]]
+id = "inspect-plane-config"
+artifacts = ["out/current/plane.toml"]
+
+[[steps]]
+id = "inspect-rover-config"
+artifacts = ["out/current/rover.toml"]

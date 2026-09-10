@@ -35,7 +35,9 @@ jobs:
           nix develop .#docs --profile out/docs-env --command python utils/configure_pages.py \
             --repository "$REPOSITORY" --branch "$DEFAULT_BRANCH" --server-url "$SERVER_URL"
       - name: Build the book
-        run: nix develop .#docs --command mdbook build docs
+        run: |
+          nix develop .#docs --command python utils/verify_tutorial.py --list
+          nix develop .#docs --command mdbook build docs
       - name: Upload preview
         uses: actions/upload-artifact@v7
         with:

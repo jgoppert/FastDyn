@@ -12,5 +12,5 @@ let
     tar -xOf ${monaco} package/ThirdPartyNotices.txt > "$out/licenses/monaco-ThirdPartyNotices.txt"
   '';
 in pkgs.writeShellScriptBin "mdbook-fastdyn-assets" ''
-  exec ${pkgs.python312}/bin/python ${../src/fastdyn/docs_assets.py} --prebuilt ${assets} "$@"
+  exec ${pkgs.python312}/bin/python -c 'import sys; sys.path.insert(0, "${../src}"); from fastdyn.docs_assets import main; main()' --prebuilt ${assets} "$@"
 ''
