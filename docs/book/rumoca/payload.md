@@ -70,6 +70,7 @@ This changes plant physics while preserving FastDyn's PWM and sensor interface.
 
 In your chosen environment, generate the configuration:
 
+<!-- fastdyn-check: payload-config -->
 ```bash
 fastdyn-config --base configs/copter462.toml \
   --overlay configs/models/qavr-side-payload.toml \
@@ -106,6 +107,7 @@ Use your unloaded QAV-R mission as the baseline. Check the roll and pitch moment
 directions above, then run the same mission with the constant load and fixed
 controller gains:
 
+<!-- fastdyn-check: payload-flight -->
 ```bash
 fastdyn run -c out/payload.toml -o out/payload/work
 ```
@@ -132,6 +134,7 @@ Now model a **smoothly varying downward tension**, instead of constant weight.
 This changes the force law while retaining the same motor geometry, firmware,
 controller, and sensor interface. Create your own source file:
 
+<!-- fastdyn-check: load-copy -->
 ```bash
 cp modelica/FastDyn/QavrSidePayload.mo modelica/FastDyn/MyLoad.mo
 ```
@@ -157,8 +160,21 @@ force varies from **0.245 N to 0.735 N**, with a mean of 0.49 N. It should be
 largest at 1.25 s and smallest at 3.75 s. `time` is simulation time, not wall
 time; the applied tension also varies before takeoff.
 
+Compare your edited file with the complete version below. CI saves this exact
+source as `modelica/FastDyn/MyLoad.mo` before running the build and flight commands.
+
+<details><summary>Complete edited MyLoad.mo</summary>
+
+<!-- fastdyn-check: load-model -->
+```modelica
+{{#include ../../snippets/MyLoad.mo}}
+```
+
+</details>
+
 Save this complete overlay as `out/my-load.toml`:
 
+<!-- fastdyn-check: load-overlay -->
 ```toml
 [FMU]
 active = "my_load"
@@ -178,6 +194,7 @@ period = 5.0
 
 Build and check the actual force before flying:
 
+<!-- fastdyn-check: load-flight -->
 ```bash
 fastdyn-config --base configs/copter462.toml --overlay out/my-load.toml \
   --overlay configs/models/qavr-controller.toml --output out/my-load-run.toml

@@ -80,6 +80,7 @@ and its moment instead, so these are two separate modeling experiments.
 
 In your chosen environment, run:
 
+<!-- fastdyn-check: qavr-dae -->
 ```bash
 rumoca compile modelica/FastDyn/Qavr.mo --model FastDyn.Qavr \
   --source-root modelica --source-root third_party/common/modelica_models \

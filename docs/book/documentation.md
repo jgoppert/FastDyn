@@ -43,6 +43,53 @@ checks their hashes, and caches them under `out/docs-downloads/`. Node and Nix
 are not needed for this path. The normal FastDyn venv already includes it.
 For **Docker**, see the [container preview command](general/container.md#run-against-your-checkout).
 
+## Executable tutorial examples
+
+The **CI-checked** boxes identify examples covered by the **Development
+container** workflow. CI extracts their code directly from the Markdown,
+runs it inside the freshly built Nix-based Docker image, and checks the
+expected output and generated files. The label links to the workflow so you
+can inspect the result for a particular revision. It identifies automated
+coverage; it is not a live status badge.
+
+The checks include Copter and Rover missions, both gain candidates and their
+validation maneuver, constant and varying loads, FMI inspection, and report
+generation. Mission checks require the completion messages, not just a zero
+exit code. CI runs the Monte Carlo reference case and replots all 18 archived
+trajectories; it does not rerun the entire payload batch. Plane configuration
+and archived reports are checked, but its unsupported flight is not.
+
+To inspect the execution order without running anything:
+
+```bash
+python utils/verify_tutorial.py --list
+```
+
+To run the checks yourself, use a fresh checkout with the source submodules
+initialized and enter your [development environment](general/environment.md):
+
+```bash
+python utils/verify_tutorial.py
+```
+
+Use a separate checkout from your experiments: the examples use exactly the
+output paths printed in the book. The runner refuses to overwrite existing
+example outputs. Nix users can run the same command inside `nix develop`;
+CI tests the Docker image derived from that shell. Allow additional time for
+the tuning trials and flights.
+
+Results and per-example logs are written to `out/tutorial-check/`. In GitHub
+Actions, download the **tutorial-verification** artifact for those logs,
+telemetry, and plots. A failed tutorial check prevents image publication.
+
+To add coverage, put a `<!-- fastdyn-check: example-id -->` comment immediately
+before a fenced code block, then add its ID to `tests/integration/tutorial.toml`.
+The TOML defines execution order, timeouts, expected output, and required files;
+it does not duplicate commands. For a complete Python, TOML, or Modelica file,
+set `write` to the path the reader is instructed to save. A whole-file mdBook
+include is also supported. Missing blocks, duplicate IDs, and marked examples
+without an execution step fail validation during the documentation build.
+
 ## Modelica source panels
 
 Use a `modelica` fenced code block for highlighted, read-only source panels.

@@ -35,6 +35,7 @@ controller target rates, altitude, and motor PWM, then lands.
 
 After generating `out/qavr.toml` in the preceding chapter, type:
 
+<!-- fastdyn-check: tuning-comparison -->
 ```bash
 python utils/tune_copter.py --config configs/tuning/qavr.toml \
   --run-config out/qavr.toml --output out/tuning
@@ -82,6 +83,7 @@ experiment: settled roll/pitch RMSE was 0.070°/0.049°, and altitude remained
 
 Reproduce the larger maneuver and plot either batch:
 
+<!-- fastdyn-check: tuning-validation -->
 ```bash
 python utils/tune_copter.py --config docs/book/assets/qavr-tuning/validation.toml \
   --candidate qav250 --run-config out/qavr.toml --output out/tuning-validation
@@ -92,6 +94,7 @@ python utils/tuning_report.py --input out/tuning --output out/tuning-response.pn
 
 Export the settings from the source TOML, then apply the controller overlay:
 
+<!-- fastdyn-check: qavr-flight -->
 ```bash
 python utils/tune_copter.py --config configs/tuning/qavr.toml \
   --candidate qav250 --export-parameters out/qavr-controller.param

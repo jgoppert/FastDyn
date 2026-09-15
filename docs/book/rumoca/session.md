@@ -12,6 +12,10 @@ check that the common commands work. Allow separate time for setup: the first
 compiler and QEMU builds can take longer than the walkthrough itself. Keep a
 terminal at the repository root and this book open beside it.
 
+Boxes marked **CI-checked** contain code that the automated tutorial check
+runs in the Nix-built Docker environment. The label links to its workflow;
+see [what these checks cover](../documentation.md#executable-tutorial-examples).
+
 You do not need to run a tuning or Monte Carlo batch in advance. The book
 includes measured gain comparisons and all 18 payload-study trajectories,
 ready to explore. You can reproduce those longer experiments afterward.

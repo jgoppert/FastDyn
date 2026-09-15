@@ -1,7 +1,8 @@
 # Publish development images
 
-`.github/workflows/dev-container.yml` builds and checks the development image
-for pull requests. Pushes to `main` also publish `latest` and `sha-<commit>` tags
+`.github/workflows/dev-container.yml` builds the development image and runs the
+[CI-checked tutorial examples](../documentation.md#executable-tutorial-examples)
+before publishing. Pushes to `main` publish `latest` and `sha-<commit>` tags
 to **`ghcr.io/<owner>/<repository>/dev`**, using lowercase repository names.
 For this repository, use `ghcr.io/jgoppert/fastdyn/dev:latest`.
 Same-repository pull requests publish a `pr-<number>` preview tag and a

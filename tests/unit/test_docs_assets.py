@@ -39,3 +39,15 @@ def test_fresh_nix_assets_make_the_destination_root_writable(tmp_path):
         stage(root, "book", prebuilt)
     finally:
         prebuilt.chmod(0o755)
+
+
+def test_authored_book_links_are_not_rewritten_as_legacy_reference_links():
+    chapter = {'source_path': 'general/container.md', 'content':
+               '[Setup](environment.md#option-a-nix)\n'
+               '[Publication](../contributing/container-publication.md)\n', 'sub_items': []}
+    original = chapter['content']
+    context = {'config': {'output': {'html': {
+        'git-repository-url': 'https://github.com/PSecLab/FastDyn',
+        'edit-url-template': 'https://github.com/PSecLab/FastDyn/edit/main/docs/book/{path}'}}}}
+    repair_reference_links({'items': [{'Chapter': chapter}]}, context)
+    assert chapter['content'] == original

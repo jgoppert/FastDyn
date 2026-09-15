@@ -9,6 +9,7 @@ This exercise uses the compiler and array-based model library pinned by the
 checkout. The selected source is the same model you will read and edit in this
 walkthrough.
 
+<!-- fastdyn-check: copter-config -->
 ```bash
 fastdyn-config --base configs/copter462.toml --output out/copter.toml
 ```
@@ -21,6 +22,7 @@ because rerunning `fastdyn-config` replaces the generated run TOML.
 
 ## Fly the mission
 
+<!-- fastdyn-check: copter-flight -->
 ```bash
 fastdyn run -c out/copter.toml -o out/copter/work
 ```
@@ -47,6 +49,7 @@ to interrupt.
 
 ## Save and inspect the result
 
+<!-- fastdyn-check: copter-report -->
 ```bash
 python -m fastdyn.mission_report --log out/copter/mission.tlog \
   --mission virtuals/physics/flight_controllers/courbet/mavlink/copter_mission.waypoints \

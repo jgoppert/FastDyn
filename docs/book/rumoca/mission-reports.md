@@ -135,6 +135,7 @@ The book includes the original telemetry and uploaded waypoint files, so you
 can regenerate the figures without rerunning a simulation. In your chosen environment,
 from the repository root:
 
+<!-- fastdyn-check: recorded-reports -->
 ```bash
 python -m fastdyn.mission_report --vehicle copter \
   --log docs/book/assets/baseline-mission.tlog \
