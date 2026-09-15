@@ -12,7 +12,7 @@
 #include "mavlink_lib.h"
 #include "mavlink.h"
 
-#define RING_BUFFER_SIZE 512
+#define RING_BUFFER_SIZE 8192
 #define DEFAULT_GCS_UDP_PORT 14551
 #define DEFAULT_GPS_INPUT_UDP_PORT 14553
 #define MAX_PACKET_SIZE 1024

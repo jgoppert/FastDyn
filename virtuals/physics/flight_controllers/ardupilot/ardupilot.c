@@ -112,6 +112,7 @@ static const size_t storage_size = 32 * 1024; // 32KB of simulated storage
  */
 void storage_read_block(unsigned int cpu_index, void *udata)
 {
+    static uint64_t read_count;
     uint8_t *temp_buffer = NULL;
 
     if (storage_memory == NULL)
@@ -134,6 +135,17 @@ void storage_read_block(unsigned int cpu_index, void *udata)
     uint32_t dst = qemu_get_register(ARM_V7M_R1);
     uint16_t loc = (uint16_t)qemu_get_register(ARM_V7M_R2);
     size_t size = (size_t)qemu_get_register(ARM_V7M_R3);
+
+    read_count++;
+    if (read_count == 1 || read_count == 10 || read_count == 100 ||
+        read_count == 1000 || read_count == 10000 || read_count == 100000) {
+        fprintf(stderr, "[STORAGE_PROBE] op=read count=%" PRIu64
+                        " sim_time_s=%.6f offset=%u size=%zu\n",
+                read_count,
+                (double)qemu_plugin_get_virtual_timer() / 1e9,
+                loc, size);
+        fflush(stderr);
+    }
 
     if (loc + size > storage_size)
     {
@@ -180,6 +192,7 @@ end:
  */
 void storage_write_block(unsigned int cpu_index, void *udata)
 {
+    static uint64_t write_count;
     uint8_t *temp_buffer = NULL;
 
     if (storage_memory == NULL)
@@ -202,6 +215,17 @@ void storage_write_block(unsigned int cpu_index, void *udata)
     uint16_t loc = (uint16_t)qemu_get_register(ARM_V7M_R1);
     uint32_t src = qemu_get_register(ARM_V7M_R2);
     size_t size = (size_t)qemu_get_register(ARM_V7M_R3);
+
+    write_count++;
+    if (write_count == 1 || write_count == 10 || write_count == 100 ||
+        write_count == 1000 || write_count == 10000 || write_count == 100000) {
+        fprintf(stderr, "[STORAGE_PROBE] op=write count=%" PRIu64
+                        " sim_time_s=%.6f offset=%u size=%zu\n",
+                write_count,
+                (double)qemu_plugin_get_virtual_timer() / 1e9,
+                loc, size);
+        fflush(stderr);
+    }
 
     if (loc + size > storage_size)
     {
@@ -699,6 +723,68 @@ static volatile double ins_last_time_s = 0.0;
 static volatile int ins_read_count = 0;
 #endif // PROFILE_INS_READS
 
+/*
+ * AP_HAL::Device is a polymorphic class on this 32-bit target.  Its vtable
+ * pointer occupies bytes 0..3, _read_flag occupies byte 4, and the naturally
+ * aligned DeviceId union starts at byte 8.  The low 16 bits identify the bus
+ * and address independently of the sensor type ArduPilot later assigns.
+ *
+ * Copter 4.7 reaches ins_block_read() through Device::read_registers(), so R0
+ * is the AP_HAL::Device pointer.  Copter 4.6's board-specific hook does not
+ * provide that pointer; unrecognised values deliberately retain the legacy
+ * mapping below.
+ */
+static uint16_t ins_device_bus_id(uint32_t device)
+{
+    uint32_t bus_id = 0;
+    if (device >= 0x20000000U && device < 0x40000000U) {
+        qemu_plugin_read_memory(device + 8U, (uint8_t *)&bus_id,
+                                sizeof(bus_id));
+    }
+    return (uint16_t)(bus_id & 0xffffU);
+}
+
+/* CubeBlack SPI bus/address IDs from hwdef.dat. */
+enum {
+    CUBEBLACK_IMU_MPU9250_EXT = 0x0122, /* SPI4, address 1: PITCH_180 */
+    CUBEBLACK_IMU_MPU9250     = 0x040a, /* SPI1, address 4: YAW_270 */
+    CUBEBLACK_IMU_ICM20602    = 0x0422, /* SPI4, address 4: ROLL_180_YAW_270 */
+};
+
+/*
+ * The legacy raw mapping is the MPU9250_EXT mapping.  ArduPilot applies
+ * PITCH_180 to it and obtains the desired body vector
+ *     b = (-raw_x, raw_y, -raw_z).
+ * Supply inverse-rotated raw vectors to the other devices so their configured
+ * board rotations produce that same b.  This preserves redundant IMUs instead
+ * of hiding the 4.7 inconsistency by setting INS_USE2=0/EK3_IMU_MASK=1.
+ */
+static void ins_match_cube_imu_orientation(uint16_t bus_id,
+                                           float *x, float *y, float *z)
+{
+    const float raw_x = *x;
+    const float raw_y = *y;
+    const float raw_z = *z;
+
+    switch (bus_id) {
+    case CUBEBLACK_IMU_MPU9250:
+        /* inverse(YAW_270) * PITCH_180 * raw */
+        *x = -raw_y;
+        *y = -raw_x;
+        *z = -raw_z;
+        break;
+    case CUBEBLACK_IMU_ICM20602:
+        /* inverse(ROLL_180_YAW_270) * PITCH_180 * raw */
+        *x = -raw_y;
+        *y = raw_x;
+        *z = raw_z;
+        break;
+    case CUBEBLACK_IMU_MPU9250_EXT:
+    default:
+        break;
+    }
+}
+
 /**
  * Must be called like this from virtuals.txt
  *
@@ -706,6 +792,8 @@ static volatile int ins_read_count = 0;
  */
 void ins_block_read(unsigned int cpu_index, void *udata)
 {
+    uint32_t device = (uint32_t)qemu_get_register(ARM_V7M_R0);
+    uint16_t device_bus_id = ins_device_bus_id(device);
     uint32_t reg = (uint32_t)qemu_get_register(ARM_V7M_R1);
     uint32_t buf = (uint32_t)qemu_get_register(ARM_V7M_R2);
     uint32_t size = (uint32_t)qemu_get_register(ARM_V7M_R3);
@@ -715,14 +803,38 @@ void ins_block_read(unsigned int cpu_index, void *udata)
     {
         if (phy_backend_is("fmu")) {
             // The emulated MPU6000 gyro samples at 8 kHz. Only report
-            // samples that have arrived since the previous FIFO poll.
-            static uint64_t last_sample_ns;
-            uint64_t now_ns = qemu_plugin_get_virtual_timer();
-            if (last_sample_ns == 0 || now_ns < last_sample_ns) {
-                last_sample_ns = now_ns;
+            // samples that have arrived since this device's previous FIFO
+            // poll. Copter 4.7 hooks the common Device::read_registers()
+            // method, so one process can reach this callback for more than
+            // one IMU. Sharing one timestamp makes later devices report empty
+            // FIFOs and can throttle the main loop below SCHED_LOOP_RATE.
+            enum { MAX_IMU_FIFO_DEVICES = 8 };
+            static uint32_t devices[MAX_IMU_FIFO_DEVICES];
+            static uint64_t last_sample_ns[MAX_IMU_FIFO_DEVICES];
+            int device_slot = -1;
+            for (int i = 0; i < MAX_IMU_FIFO_DEVICES; i++) {
+                if (devices[i] == device) {
+                    device_slot = i;
+                    break;
+                }
+                if (devices[i] == 0) {
+                    devices[i] = device;
+                    device_slot = i;
+                    break;
+                }
             }
-            uint64_t samples = (now_ns - last_sample_ns) / 125000;
-            last_sample_ns += samples * 125000;
+            if (device_slot < 0) {
+                qemu_set_register(0, ARM_V7M_R0);
+                qemu_set_register(qemu_get_register(ARM_V7M_LR), ARM_V7M_PC);
+                return;
+            }
+            uint64_t now_ns = qemu_plugin_get_virtual_timer();
+            uint64_t *last_ns = &last_sample_ns[device_slot];
+            if (*last_ns == 0 || now_ns < *last_ns) {
+                *last_ns = now_ns;
+            }
+            uint64_t samples = (now_ns - *last_ns) / 125000;
+            *last_ns += samples * 125000;
             if (samples > 32) {
                 samples = 32;
             }
@@ -813,6 +925,15 @@ void ins_block_read(unsigned int cpu_index, void *udata)
                 temp_gyro_z = -1 * gyro_z;
             }
 
+            ins_match_cube_imu_orientation(device_bus_id,
+                                           &temp_accel_x,
+                                           &temp_accel_y,
+                                           &temp_accel_z);
+            ins_match_cube_imu_orientation(device_bus_id,
+                                           &temp_gyro_x,
+                                           &temp_gyro_y,
+                                           &temp_gyro_z);
+
             // Apply remapping and sign adjustments here if needed
             float imu_data[7] = {
                 temp_accel_x,
@@ -871,7 +992,15 @@ void ins_block_read(unsigned int cpu_index, void *udata)
     }
     else
     {
-        fprintf(stderr, "INS block read unknown register: 0x%X\n", reg);
+        /*
+         * Copter 4.7 reaches this callback through the public
+         * AP_HAL::Device::read_registers() method.  That method is shared by
+         * non-IMU devices.  A FastDyn virtual replaces the guest instruction,
+         * so it cannot fall through to the firmware at the same PC.  Fail
+         * unknown registers explicitly; otherwise execution retriggers this
+         * callback forever.  The board-specific startup hooks bypass hardware
+         * probes that are expected to succeed in this rehosted configuration.
+         */
         qemu_set_register(0, ARM_V7M_R0);                             // failure
         qemu_set_register(qemu_get_register(ARM_V7M_LR), ARM_V7M_PC); // return
     }
@@ -1126,6 +1255,21 @@ static uint32_t lidar_uart = 0;
 static rplidar_dev_t rplidar_device;
 static bool rplidar_initialized = false;
 
+static void record_gcs_uart(uint32_t uart_num)
+{
+    // find the first empty slot and put it in
+    for (int i = 0; i < 8; i++)
+    {
+        if (gcs_uarts[i] == 0)
+        {
+            gcs_uarts[i] = uart_num;
+            printf("GCS using UART at address 0x%X\n", uart_num);
+            fflush(stdout);
+            break;
+        }
+    }
+}
+
 /**
  * @brief Record UART used by GCS
  *
@@ -1136,16 +1280,121 @@ static bool rplidar_initialized = false;
 void create_gcs_mavlink_backend(unsigned int cpu_index, void *udata)
 {
     uint32_t uart_num = (uint32_t)qemu_get_register(ARM_V7M_R2);
-    // find the first empty slot and put it in
-    for (int i = 0; i < 8; i++)
-    {
-        if (gcs_uarts[i] == 0)
-        {
-            gcs_uarts[i] = uart_num;
-            printf("GCS using UART at address 0x%X\n", uart_num);
+    record_gcs_uart(uart_num);
+}
+
+/**
+ * @brief Record UART used by GCS in Copter 4.7.
+ *
+ * Copter 4.7 changed GCS::create_gcs_mavlink_backend() from
+ * (GCS_MAVLINK_Parameters&, UARTDriver&) to (UARTDriver&).  R0 remains the
+ * implicit GCS `this` pointer, so the UART reference moves from R2 to R1.
+ */
+void create_gcs_mavlink_backend_v470(unsigned int cpu_index, void *udata)
+{
+    uint32_t uart_num = (uint32_t)qemu_get_register(ARM_V7M_R1);
+    record_gcs_uart(uart_num);
+}
+
+/**
+ * @brief Prove that a firmware lifecycle or control point executes.
+ *
+ * Reporting only the first hit and powers of ten avoids making a hot 400 Hz
+ * control-loop probe dominated by terminal I/O.
+ */
+void flight_loop_probe(unsigned int cpu_index, void *udata)
+{
+    enum { MAX_PROBES = 64 };
+    static const char *tags[MAX_PROBES];
+    static uint64_t counts[MAX_PROBES];
+    const char *tag = udata ? (const char *)udata : "unnamed";
+    int slot = -1;
+
+    for (int i = 0; i < MAX_PROBES; i++) {
+        if (tags[i] == NULL) {
+            tags[i] = tag;
+            slot = i;
+            break;
+        }
+        if (strcmp(tags[i], tag) == 0) {
+            slot = i;
             break;
         }
     }
+    if (slot < 0) {
+        return;
+    }
+
+    uint64_t count = ++counts[slot];
+    if (count == 1 || count == 10 || count == 100 || count == 1000 ||
+        count == 10000 || count == 100000) {
+        double sim_time_s = (double)qemu_plugin_get_virtual_timer() / 1e9;
+        fprintf(stderr, "[FLIGHT_LOOP_PROBE] tag=%s count=%" PRIu64
+                        " sim_time_s=%.6f pc=0x%08X\n",
+                tag, count, sim_time_s,
+                (uint32_t)qemu_get_register(ARM_V7M_PC));
+        fflush(stderr);
+    }
+
+    if (count == 1 && strcmp(tag, "scheduler_init") == 0) {
+        int16_t configured_rate_hz = 0;
+        uint32_t scheduler = (uint32_t)qemu_get_register(ARM_V7M_R0);
+        qemu_plugin_read_memory(scheduler + 0x3AU,
+                                (uint8_t *)&configured_rate_hz,
+                                sizeof(configured_rate_hz));
+        fprintf(stderr,
+                "[SCHEDULER_PROBE] configured_loop_rate_hz=%d "
+                "scheduler=0x%08X\n",
+                configured_rate_hz, scheduler);
+        fflush(stderr);
+    }
+}
+
+/**
+ * @brief Report the fully qualified reason entering AP_Arming::check_failed().
+ *
+ * The firmware's arming failure is occasionally emitted before the rehosted
+ * MAVLink path has a usable STATUSTEXT subscriber.  This observational hook
+ * makes that reason available during integration diagnostics while leaving
+ * registers, guest memory, and control flow unchanged.  It is silent unless
+ * FASTDYN_DEBUG_ARMING is set to a non-zero value.
+ */
+void arming_check_failed_probe(unsigned int cpu_index, void *udata)
+{
+    (void)cpu_index;
+    (void)udata;
+
+    const char *enabled = getenv("FASTDYN_DEBUG_ARMING");
+    if (enabled == NULL || enabled[0] == '\0' || strcmp(enabled, "0") == 0) {
+        return;
+    }
+
+    const uint32_t format_address = (uint32_t)qemu_get_register(ARM_V7M_R2);
+    const uint32_t first_argument = (uint32_t)qemu_get_register(ARM_V7M_R3);
+    char format[128] = {0};
+    char argument[128] = {0};
+
+    for (size_t i = 0; i + 1 < sizeof(format); i++) {
+        qemu_plugin_read_memory(format_address + (uint32_t)i,
+                                (uint8_t *)&format[i], 1);
+        if (format[i] == '\0') {
+            break;
+        }
+    }
+    if (strstr(format, "%s") != NULL && first_argument != 0) {
+        for (size_t i = 0; i + 1 < sizeof(argument); i++) {
+            qemu_plugin_read_memory(first_argument + (uint32_t)i,
+                                    (uint8_t *)&argument[i], 1);
+            if (argument[i] == '\0') {
+                break;
+            }
+        }
+    }
+
+    fprintf(stderr,
+            "[ARMING_CHECK_PROBE] report=%u format=\"%s\" argument=\"%s\"\n",
+            (unsigned)qemu_get_register(ARM_V7M_R1), format, argument);
+    fflush(stderr);
 }
 
 /**
@@ -1198,7 +1447,7 @@ void gcs_send_banner_once(unsigned int cpu_index, void *udata)
 static RingBuffer ring_buffer;
 static bool ring_buffer_initialized = false;
 
-#define RING_BUFFER_SIZE 1024
+#define RING_BUFFER_SIZE 8192
 
 /**
  * @brief Record Lidar UART for later use
@@ -1598,6 +1847,7 @@ All virtuals should be called like this:
 
 void ap_fs_open(unsigned int cpu_index, void *udata)
 {
+    static uint64_t open_count;
     uint32_t fname_ptr = (uint32_t)qemu_get_register(ARM_V7M_R1);
     uint32_t guest_flags = (uint32_t)qemu_get_register(ARM_V7M_R2);
     // ArduPilot's ARM newlib flags differ from the host's POSIX flag values.
@@ -1611,8 +1861,40 @@ void ap_fs_open(unsigned int cpu_index, void *udata)
     memset(fname, 0, sizeof(fname));
     qemu_plugin_read_memory(fname_ptr, (uint8_t *)fname, sizeof(fname));
 
+    open_count++;
+    if (open_count <= 10) {
+        fprintf(stderr, "[FILESYSTEM_PROBE] op=open count=%" PRIu64
+                        " sim_time_s=%.6f name=%s guest_flags=0x%X\n",
+                open_count,
+                (double)qemu_plugin_get_virtual_timer() / 1e9,
+                memchr(fname, '\0', sizeof(fname)) ? fname : "<unterminated>",
+                guest_flags);
+        fflush(stderr);
+    }
+
     int fd = -1;
     if (memchr(fname, '\0', sizeof(fname))) {
+        /*
+         * The top-level AP_Filesystem methods are virtualised, so the native
+         * ROMFS backend cannot be resumed from this callback.  Mirror the
+         * exact board/version defaults file into the rehosting tree and expose
+         * it as a normal host descriptor. The version selector supplies the
+         * hash-verified path in the QEMU environment.
+         */
+        if (strcmp(fname, "@ROMFS/defaults.parm") == 0) {
+            const char *romfs_defaults = getenv("FASTDYN_ROMFS_DEFAULTS");
+            if (romfs_defaults != NULL && romfs_defaults[0] != '\0') {
+                fd = open(romfs_defaults, O_RDONLY);
+            }
+            if (open_count == 1) {
+                fprintf(stderr,
+                        "[FILESYSTEM_PROBE] romfs_defaults=%s host_fd=%d\n",
+                        romfs_defaults ? romfs_defaults : "<unset>", fd);
+                fflush(stderr);
+            }
+            goto complete;
+        }
+
         // A guest absolute path belongs to the guest filesystem, not the host.
         const char *relative_name = fname;
         while (*relative_name == '/') relative_name++;
@@ -1630,6 +1912,7 @@ void ap_fs_open(unsigned int cpu_index, void *udata)
             g_free(parent);
         }
     }
+complete:
     if (fd >= 0) mark_open_flight_log_fd(fd);
     qemu_set_register(fd, ARM_V7M_R0);
     uint32_t lr = qemu_get_register(ARM_V7M_LR);
@@ -1639,6 +1922,12 @@ void ap_fs_open(unsigned int cpu_index, void *udata)
 void ap_fs_close(unsigned int cpu_index, void *udata)
 {
     uint32_t fd = (uint32_t)qemu_get_register(ARM_V7M_R1);
+    // ArduPilot offsets non-local backend descriptors by 256.
+    if (fd >= 256U) {
+        qemu_set_register((uint32_t)-1, ARM_V7M_R0);
+        qemu_set_register(qemu_get_register(ARM_V7M_LR), ARM_V7M_PC);
+        return;
+    }
     int result = close(fd);
     mark_close_flight_log_fd(fd);
     qemu_set_register(result, ARM_V7M_R0);
@@ -1648,7 +1937,22 @@ void ap_fs_close(unsigned int cpu_index, void *udata)
 
 void ap_fs_read(unsigned int cpu_index, void *udata)
 {
+    static uint64_t read_count;
     uint32_t fd = (uint32_t)qemu_get_register(ARM_V7M_R1);
+    read_count++;
+    if (read_count == 1 || read_count == 10 || read_count == 100 ||
+        read_count == 1000 || read_count == 10000 || read_count == 100000) {
+        fprintf(stderr, "[FILESYSTEM_PROBE] op=read count=%" PRIu64
+                        " sim_time_s=%.6f fd=%u\n",
+                read_count,
+                (double)qemu_plugin_get_virtual_timer() / 1e9, fd);
+        fflush(stderr);
+    }
+    if (fd >= 256U) {
+        qemu_set_register((uint32_t)-1, ARM_V7M_R0);
+        qemu_set_register(qemu_get_register(ARM_V7M_LR), ARM_V7M_PC);
+        return;
+    }
     uint32_t buf_ptr = (uint32_t)qemu_get_register(ARM_V7M_R2);
     uint32_t count = (uint32_t)qemu_get_register(ARM_V7M_R3);
     char *buf = (char *)malloc(count);
@@ -1671,6 +1975,11 @@ void ap_fs_read(unsigned int cpu_index, void *udata)
 void ap_fs_write(unsigned int cpu_index, void *udata)
 {
     uint32_t fd = (uint32_t)qemu_get_register(ARM_V7M_R1);
+    if (fd >= 256U) {
+        qemu_set_register((uint32_t)-1, ARM_V7M_R0);
+        qemu_set_register(qemu_get_register(ARM_V7M_LR), ARM_V7M_PC);
+        return;
+    }
     uint32_t buf_ptr = (uint32_t)qemu_get_register(ARM_V7M_R2);
     uint32_t count = (uint32_t)qemu_get_register(ARM_V7M_R3);
     char *buf = (char *)malloc(count);
@@ -1693,6 +2002,11 @@ void ap_fs_write(unsigned int cpu_index, void *udata)
 void ap_fs_fsync(unsigned int cpu_index, void *udata)
 {
     uint32_t fd = (uint32_t)qemu_get_register(ARM_V7M_R1);
+    if (fd >= 256U) {
+        qemu_set_register((uint32_t)-1, ARM_V7M_R0);
+        qemu_set_register(qemu_get_register(ARM_V7M_LR), ARM_V7M_PC);
+        return;
+    }
     int result = fsync(fd);
     qemu_set_register(result, ARM_V7M_R0);
     uint32_t lr = qemu_get_register(ARM_V7M_LR);
@@ -1708,19 +2022,37 @@ void ap_fs_fsync(unsigned int cpu_index, void *udata)
  */
 void copter_allocate_motors(unsigned int cpu_index, void *udata)
 {
-    // uint32_t frame_class_addr = 0x20008284; // AP_Copter::FrameClass static instance
-    // uint32_t frame_class = 11; // dual
+    /*
+     * FRAME_CLASS is an AP_Int8 embedded in the global Copter object.  Its
+     * offset is firmware-layout-specific, so keep the offset in the matching
+     * virtuals file instead of baking one release's absolute RAM address into
+     * this shared callback.
+     */
     uint8_t frame_class = 1; // quad
     uint32_t copter_base = (uint32_t)qemu_get_register(ARM_V7M_R0);
-    uint32_t g2_ref = copter_base + 0x42c8;
-    uint32_t g2_addr = 0;
-    qemu_plugin_read_memory(g2_ref, (uint8_t *)&g2_addr, sizeof(uint32_t));
-    uint32_t frame_class_addr = g2_addr + 0xaac;
-    if (0x20008284 != frame_class_addr)
+    const char *offset_text = udata ? (const char *)udata : NULL;
+    char *offset_end = NULL;
+    unsigned long frame_class_offset =
+        offset_text ? strtoul(offset_text, &offset_end, 0) : 0;
+
+    if (copter_base < 0x20000000U || copter_base >= 0x40000000U ||
+        offset_text == NULL || offset_end == offset_text || *offset_end != '\0' ||
+        frame_class_offset > UINT32_MAX - copter_base)
     {
-        fprintf(stderr, "Copter frame class address mismatch: expected 0x20008284, got 0x%08X\n", frame_class_addr);
+        fprintf(stderr,
+                "Invalid Copter FRAME_CLASS hook: base=0x%08X offset=%s\n",
+                copter_base, offset_text ? offset_text : "<missing>");
+        return;
     }
-    qemu_plugin_write_memory(0x20008284, (uint8_t *)&frame_class, sizeof(uint8_t));
+
+    uint32_t frame_class_addr = copter_base + (uint32_t)frame_class_offset;
+    qemu_plugin_write_memory(frame_class_addr, (uint8_t *)&frame_class,
+                             sizeof(frame_class));
+    fprintf(stderr,
+            "Copter FRAME_CLASS set to QUAD at 0x%08X "
+            "(base=0x%08X offset=0x%lX)\n",
+            frame_class_addr, copter_base, frame_class_offset);
+    fflush(stderr);
 }
 
 /**
@@ -2060,6 +2392,9 @@ int ardupilot_init_virtuals(int argc, char **argv)
 
     // GCS
     virtual_register("create_gcs_mavlink_backend", create_gcs_mavlink_backend);
+    virtual_register("create_gcs_mavlink_backend_v470", create_gcs_mavlink_backend_v470);
+    virtual_register("flight_loop_probe", flight_loop_probe);
+    virtual_register("arming_check_failed_probe", arming_check_failed_probe);
     virtual_register("gcs_send_mavlink_message", gcs_send_mavlink_message);
     virtual_register("gcs_send_text", gcs_send_text);
     virtual_register("gcs_send_banner_once", gcs_send_banner_once);

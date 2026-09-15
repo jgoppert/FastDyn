@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -184,6 +185,8 @@ def analyze(csv_path, minimum_rate_hz):
     for axis in ("roll", "pitch"):
         error = data[f"{axis}_deg"] - data[f"{axis}_command_deg"]
         result[f"{axis}_rmse_deg"] = float(np.sqrt(np.mean(error**2)))
+        result[f"{axis}_peak_error_deg"] = float(np.max(np.abs(error)))
+        result[f"{axis}_peak_rate_dps"] = float(np.max(np.abs(data[f"{axis}_rate_dps"])))
         settled = data["step_time_s"] > 1.0
         result[f"{axis}_settled_rmse_deg"] = float(np.sqrt(np.mean(error[settled]**2)))
         rate_error = data[f"{axis}_rate_dps"] - data[f"{axis}_target_rate_dps"]
@@ -192,6 +195,14 @@ def analyze(csv_path, minimum_rate_hz):
             float(np.sqrt(np.mean(rate_error[finite]**2))) if finite.any() else None)
     result["altitude_min_m"] = float(data["altitude_m"].min())
     result["altitude_max_m"] = float(data["altitude_m"].max())
+    pwm = np.column_stack([data[f"pwm{i}"] for i in range(1, 5)])
+    finite_pwm = pwm[np.isfinite(pwm)]
+    if finite_pwm.size:
+        spread = np.nanmax(pwm, axis=1) - np.nanmin(pwm, axis=1)
+        result["motor_pwm_min"] = float(np.min(finite_pwm))
+        result["motor_pwm_max"] = float(np.max(finite_pwm))
+        result["motor_pwm_spread_p95"] = float(np.nanpercentile(spread, 95))
+        result["motor_high_saturation_percent"] = float(100 * np.mean(finite_pwm >= 1990))
     return result
 
 
@@ -213,7 +224,10 @@ def run(args):
         trial_path.write_text(tomli_w.dumps(trial))
         config = read_toml(args.run_config)
         config["Machine"]["monitor_port"] = settings["experiment"]["monitor_port"]
-        config["Machine"]["qmp_socket"] = str(directory.resolve() / "qmp.sock")
+        # QEMU's Unix-domain socket path is limited to about 108 bytes on Linux.
+        # Trial names may be descriptive, so use a stable short path in /tmp.
+        socket_id = hashlib.sha256(str(directory.resolve()).encode()).hexdigest()[:16]
+        config["Machine"]["qmp_socket"] = f"/tmp/fastdyn-{socket_id}.qmp"
         config["Machine"]["log_file"] = str(directory / "qemu.log")
         for group in config["Memory"].values():
             for bank in group if isinstance(group, list) else [group]:

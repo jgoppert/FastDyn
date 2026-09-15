@@ -1,10 +1,31 @@
 # Run models from the command line
 
+## Select the ArduCopter version
+
+The Copter rehosting hooks are version-specific. Select the firmware and its
+matching hook/config set together with the version runner:
+
+```bash
+nix develop
+python utils/run_copter_version.py --list
+python utils/run_copter_version.py --version 4.7.0
+python utils/run_copter_version.py --version 4.6.2
+```
+
+`4.7` and `4.6` are accepted when they identify exactly one manifest entry.
+Before rendering the configuration, the runner verifies the firmware and board
+ROMFS-defaults SHA-256 values recorded in `configs/copter_versions.toml`; this
+prevents a firmware binary from being combined accidentally with hooks or
+defaults for another release. Use
+`--prepare-only` to render and verify without starting QEMU, and `--overlay`
+to add a normal FastDyn configuration overlay.
+
 Choose [an environment](../general/environment.md), then generate a config for the firmware and plant you want:
 
 | Vehicle | Base config | Model | Mission completion |
 | --- | --- | --- | --- |
-| Copter | `configs/copter462.toml` | `FastDyn.Copter` | Final landing |
+| Copter 4.7.0 | `configs/copter470.toml` | `FastDyn.Copter` | Control loop, heartbeat, and GPS verified; EKF mission readiness pending |
+| Copter 4.6.2 | `configs/copter462.toml` | `FastDyn.Copter` | Final landing |
 | Rover | `configs/rover462.toml` | `FastDyn.Rover` | Final waypoint reached |
 
 For Rover:

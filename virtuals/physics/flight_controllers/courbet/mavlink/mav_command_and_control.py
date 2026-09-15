@@ -12,6 +12,7 @@ import struct
 import time
 
 from pymavlink import mavutil, mavwp
+from pymavlink.dialects.v10 import ardupilotmega as mavlink1
 
 try:
     from fastdyn import timing
@@ -30,6 +31,9 @@ except Exception:  # pragma: no cover - keeps the script usable outside FastDyn 
 
 
 DEFAULT_CONNECT = "udpin:127.0.0.1:14552"
+# ArduPilot's MAV_CMD_COMPONENT_ARM_DISARM force-arm magic.  Do not use
+# 21196 here: that value is reserved for force-disarm.
+ARDUPILOT_FORCE_ARM_MAGIC = 2989
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,6 +44,11 @@ def parse_args() -> argparse.Namespace:
         "--connect",
         default=DEFAULT_CONNECT,
         help=f"MAVLink connection string (default: {DEFAULT_CONNECT})",
+    )
+    parser.add_argument(
+        "--logfile",
+        type=Path,
+        help="Optional timestamped MAVLink log written directly by this helper",
     )
     parser.add_argument("--heartbeat-timeout", type=float, default=120.0)
     parser.add_argument("--ready-timeout", type=float, default=180.0)
@@ -103,13 +112,40 @@ def require_file(path: Path) -> None:
         raise FileNotFoundError(path)
 
 
-def connect(endpoint: str, heartbeat_timeout: float) -> mavutil.mavfile:
+def connect(
+    endpoint: str, heartbeat_timeout: float, logfile: Path | None = None
+) -> mavutil.mavfile:
     print(f"[mission] connecting to {endpoint}", flush=True)
-    mav = mavutil.mavlink_connection(endpoint)
+    mav = mavutil.mavlink_connection(endpoint, source_system=255, source_component=190)
+    if logfile is not None:
+        logfile.parent.mkdir(parents=True, exist_ok=True)
+        mav.logfile = logfile.open("wb")
+    # A direct udpout connection must transmit once before the firmware-side
+    # UDP bridge knows the return endpoint.  Routed udpin connections already
+    # have a peer, so retain their receive-first behavior.
+    direct_udp = endpoint.startswith("udpout:")
+    if direct_udp:
+        mav.mav.heartbeat_send(
+            mavutil.mavlink.MAV_TYPE_GCS,
+            mavutil.mavlink.MAV_AUTOPILOT_INVALID,
+            0,
+            0,
+            mavutil.mavlink.MAV_STATE_ACTIVE,
+        )
     deadline = time.monotonic() + heartbeat_timeout
+    next_direct_heartbeat = time.monotonic() + 1.0
     heartbeat = None
     while time.monotonic() < deadline:
         msg = mav.recv_match(type="HEARTBEAT", blocking=True, timeout=1.0)
+        if direct_udp and time.monotonic() >= next_direct_heartbeat:
+            mav.mav.heartbeat_send(
+                mavutil.mavlink.MAV_TYPE_GCS,
+                mavutil.mavlink.MAV_AUTOPILOT_INVALID,
+                0,
+                0,
+                mavutil.mavlink.MAV_STATE_ACTIVE,
+            )
+            next_direct_heartbeat = time.monotonic() + 1.0
         if msg is None:
             continue
         source_system = int(msg.get_srcSystem())
@@ -265,6 +301,27 @@ def wait_ack(mav: mavutil.mavfile, command: int, timeout: float = 10.0) -> objec
     return None
 
 
+def send_mission_v1(mav: mavutil.mavfile, message: object) -> None:
+    """Send an exact MAVLink-1 mission packet with no extension fields.
+
+    A connection that receives MAVLink 2 telemetry can dynamically switch
+    pymavlink's encoder to the v20 dialect.  ``force_mavlink1=True`` then
+    changes the framing byte but retains the v20 mission-type extension,
+    producing a noncanonical 5-byte MISSION_COUNT.  Construct these explicitly
+    with the v10 dialect (4-byte MISSION_COUNT, 2-byte CLEAR_ALL) to remove
+    extension/framing ambiguity and remain compatible with older endpoints.
+    """
+    encoder = getattr(mav, "_fastdyn_mavlink1_encoder", None)
+    if encoder is None:
+        encoder = mavlink1.MAVLink(
+            None,
+            srcSystem=mav.source_system,
+            srcComponent=mav.source_component,
+        )
+        mav._fastdyn_mavlink1_encoder = encoder
+    mav.write(message.pack(encoder))
+
+
 def upload_mission(mav: mavutil.mavfile, path: Path, timeout: float) -> int:
     loader = mavwp.MAVWPLoader()
     loader.load(str(path))
@@ -280,18 +337,46 @@ def upload_mission(mav: mavutil.mavfile, path: Path, timeout: float) -> int:
     ):
         print("[mission] keeping QGC home row for ArduPilot mission indexing", flush=True)
 
+    # Component zero is the MAVLink broadcast component.  It avoids coupling
+    # the mission service to whichever component happened to emit the first
+    # heartbeat while retaining the target system restriction.
+    mission_target_component = 0
+
     for seq, item in enumerate(items):
         item.seq = seq
         item.current = 1 if seq == 0 else 0
         item.target_system = mav.target_system
-        item.target_component = mav.target_component
+        item.target_component = mission_target_component
 
     count = len(items)
     print(f"[mission] uploading {count} mission items from {path}", flush=True)
-    mav.mav.mission_clear_all_send(mav.target_system, mav.target_component)
+    # Mission transfers are stateful and an isolated UDP packet may be dropped
+    # while the emulated flight controller is draining its startup telemetry.
+    # Re-send CLEAR_ALL/COUNT until the corresponding response rather than
+    # assuming the first datagram arrived.  This is also what full GCS mission
+    # implementations do on a lossy radio link.
+    # Force MAVLink 1 framing for the base mission protocol.  The emulated 4.7
+    # UART accepts MAVLink 2 for normal telemetry/parameters but its rehosted
+    # parser has not reliably dispatched zero-extension MAVLink 2 MISSION_COUNT
+    # packets.  Mission type 0 has no semantic loss in MAVLink 1.
+    send_mission_v1(
+        mav,
+        mavlink1.MAVLink_mission_clear_all_message(
+            mav.target_system, mission_target_component
+        ),
+    )
     clear_ack_deadline = time.monotonic() + 3.0
+    next_clear_send = time.monotonic() + 1.0
     while time.monotonic() < clear_ack_deadline:
         msg = mav.recv_match(type=["MISSION_ACK", "STATUSTEXT"], blocking=True, timeout=0.5)
+        if time.monotonic() >= next_clear_send:
+            send_mission_v1(
+                mav,
+                mavlink1.MAVLink_mission_clear_all_message(
+                    mav.target_system, mission_target_component
+                ),
+            )
+            next_clear_send = time.monotonic() + 1.0
         if msg is None:
             continue
         if msg.get_type() == "STATUSTEXT":
@@ -301,19 +386,36 @@ def upload_mission(mav: mavutil.mavfile, path: Path, timeout: float) -> int:
             raise RuntimeError(f"mission clear rejected with ack type {msg.type}")
         print("[mission] previous mission cleared", flush=True)
         break
-    mav.mav.mission_count_send(mav.target_system, mav.target_component, count)
+    send_mission_v1(
+        mav,
+        mavlink1.MAVLink_mission_count_message(
+            mav.target_system, mission_target_component, count
+        ),
+    )
 
     sent: set[int] = set()
     deadline = time.monotonic() + timeout
+    next_count_send = time.monotonic() + 1.0
     while time.monotonic() < deadline:
         msg = mav.recv_match(
-            type=["MISSION_REQUEST", "MISSION_REQUEST_INT", "MISSION_ACK"],
+            type=["MISSION_REQUEST", "MISSION_REQUEST_INT", "MISSION_ACK", "STATUSTEXT"],
             blocking=True,
-            timeout=1.0,
+            timeout=0.5,
         )
+        if not sent and time.monotonic() >= next_count_send:
+            send_mission_v1(
+                mav,
+                mavlink1.MAVLink_mission_count_message(
+                    mav.target_system, mission_target_component, count
+                ),
+            )
+            next_count_send = time.monotonic() + 1.0
         if msg is None:
             continue
         msg_type = msg.get_type()
+        if msg_type == "STATUSTEXT":
+            handle_runtime_message(mav, msg)
+            continue
         if msg_type == "MISSION_ACK":
             if msg.type != mavutil.mavlink.MAV_MISSION_ACCEPTED:
                 raise RuntimeError(f"mission upload rejected with ack type {msg.type}")
@@ -333,21 +435,24 @@ def upload_mission(mav: mavutil.mavfile, path: Path, timeout: float) -> int:
         item = items[seq]
         print(f"[mission] sending mission item {seq}/{count - 1}", flush=True)
         if msg_type == "MISSION_REQUEST_INT":
-            mav.mav.mission_item_int_send(
-                mav.target_system,
-                mav.target_component,
-                item.seq,
-                item.frame,
-                item.command,
-                item.current,
-                item.autocontinue,
-                item.param1,
-                item.param2,
-                item.param3,
-                item.param4,
-                int(item.x * 1e7),
-                int(item.y * 1e7),
-                item.z,
+            send_mission_v1(
+                mav,
+                mavlink1.MAVLink_mission_item_int_message(
+                    mav.target_system,
+                    mission_target_component,
+                    item.seq,
+                    item.frame,
+                    item.command,
+                    item.current,
+                    item.autocontinue,
+                    item.param1,
+                    item.param2,
+                    item.param3,
+                    item.param4,
+                    int(item.x * 1e7),
+                    int(item.y * 1e7),
+                    item.z,
+                ),
             )
         else:
             mav.mav.send(item)
@@ -376,7 +481,7 @@ def request_arm(mav: mavutil.mavfile, *, force: bool) -> None:
         mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
         0,
         1,
-        21196 if force else 0,
+        ARDUPILOT_FORCE_ARM_MAGIC if force else 0,
         0,
         0,
         0,
@@ -593,7 +698,11 @@ def ensure_armed_and_started(
 
 def wait_for_gps_fusion(mav: mavutil.mavfile, count: int, timeout: float) -> None:
     print(f"[mission] waiting up to {timeout:g}s for EKF GPS fusion", flush=True)
-    state: dict[str, object] = {"last_seq": -1, "gps_fusing": False}
+    state: dict[str, object] = {
+        "last_seq": -1,
+        "gps_fusing": False,
+        "ekf_ready": False,
+    }
     deadline = time.monotonic() + timeout
 
     while time.monotonic() < deadline:
@@ -601,7 +710,10 @@ def wait_for_gps_fusion(mav: mavutil.mavfile, count: int, timeout: float) -> Non
         if msg is None:
             continue
         handle_runtime_message(mav, msg, count=count, state=state)
-        if state.get("gps_fusing"):
+        # The textual "is using GPS" notification is transient and may have
+        # been consumed by the earlier readiness wait.  EKF_STATUS_REPORT is
+        # the persistent equivalent and prevents an unnecessary full timeout.
+        if state.get("gps_fusing") or state.get("ekf_ready"):
             print("[mission] EKF GPS fusion confirmed", flush=True)
             timing.mark("mission.gps_fusion_confirmed", echo=True)
             return
@@ -673,7 +785,7 @@ def main() -> int:
 
     with timing.phase("mission.total"):
         with timing.phase("mission.connect"):
-            mav = connect(args.connect, args.heartbeat_timeout)
+            mav = connect(args.connect, args.heartbeat_timeout, args.logfile)
         with timing.phase("mission.load_params"):
             load_params(mav, args.param_file)
             load_mutation_params(mav, args.mutation_params, args.mutation_bin)

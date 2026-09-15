@@ -1,0 +1,65 @@
+0x800531c start_advancing_sim
+0x80f3f50 storage_read_block *
+0x80f3f88 storage_write_block *
+0x815d25c hrt_micros64 *
+0x80f40e8 micros32 *
+0x8142108 adc_voltage *
+0x8142110 adc_voltage *
+0x814510c write_channel
+0x804427c ins_block_read *
+0x802f548 compass_configure *
+0x8032960 compass_read_block *
+0x815ee94 chibiOS_tick_handler *
+0x808ed94 create_gcs_mavlink_backend_v470
+0x8081244 flight_loop_probe vehicle_setup
+0x80748d0 flight_loop_probe param_defaults
+0x807fbf8 flight_loop_probe serial_console
+0x807338c flight_loop_probe param_check
+0x800b1f0 flight_loop_probe load_parameters
+0x8080cc8 flight_loop_probe vehicle_load_parameters
+0x809665c flight_loop_probe storage_erase
+0x8073238 flight_loop_probe param_erase_all
+0x8075ae8 flight_loop_probe param_load_all
+0x8075aa4 flight_loop_probe param_reload_defaults
+0x8075978 flight_loop_probe param_load_defaults_file
+0x8147910 flight_loop_probe register_io_process
+0x807541c flight_loop_probe param_convert_class
+0x807551c flight_loop_probe param_convert_g2
+0x807555c flight_loop_probe param_convert_top
+0x80753a8 flight_loop_probe param_convert_old
+0x80753dc flight_loop_probe param_convert_scaled
+0x807f934 flight_loop_probe scheduler_init
+0x808a61c flight_loop_probe gcs_init
+0x807ff20 flight_loop_probe serial_init
+0x8027de0 flight_loop_probe board_init
+0x8083b14 flight_loop_probe logger_init
+0x801ed30 flight_loop_probe copter_init
+0x8025d18 flight_loop_probe barometer_init
+0x808ee58 flight_loop_probe gcs_setup_uarts
+0x801dd8c flight_loop_probe rc_input_init
+0x801de44 flight_loop_probe rc_output_init
+0x8037824 flight_loop_probe gps_init
+0x802f020 flight_loop_probe compass_init
+0x80262dc flight_loop_probe barometer_calibrate
+0x801e580 flight_loop_probe ins_ground_start
+0x8020464 flight_loop_probe ahrs_init
+0x8047e10 flight_loop_probe inertial_sensor_init
+0x8020694 flight_loop_probe ahrs_reset
+0x8081054 flight_loop_probe vehicle_loop
+0x807fa8c flight_loop_probe scheduler_loop
+0x8007128 flight_loop_probe rate_controller
+0x80d7170 arming_check_failed_probe
+0x808a68c gcs_send_text
+0x808a64c gcs_send_text
+0x808cee4 gcs_send_banner_once *
+0x8044a0c gcs_read *
+0x8044924 uart_bytes_available *
+0x8088f14 gcs_send_mavlink_message *
+0x815ef9e raise_periodic_irq 66
+0x8037d7c gps_get_type_mavlink
+0x80c2398 ap_fs_read *
+0x80c2314 ap_fs_open *
+0x80c23f0 ap_fs_fsync *
+0x80c23c4 ap_fs_write *
+0x80c2370 ap_fs_close *
+0x801e78c copter_allocate_motors 0x5398

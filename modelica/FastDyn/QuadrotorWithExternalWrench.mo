@@ -40,6 +40,8 @@ model QuadrotorWithExternalWrench
   parameter Real Cl_p = -0.2 "Rolling moment coefficient per roll rate";
   parameter Real Cm_q = -0.2 "Pitching moment coefficient per pitch rate";
   parameter Real Cn_r = -0.1 "Yawing moment coefficient per yaw rate";
+  parameter Real motor_thrust_scale[4] = {1, 1, 1, 1}
+    "Per-motor thrust effectiveness multiplier for fault/robustness studies";
   parameter Real S = 0.1 "Reference area [m^2]";
   parameter Real CdA[3] = {0.06, 0.08, 0.12} "Body-axis drag area [m^2]";
   parameter Real linear_drag[3] = {0.12, 0.12, 0.18} "Low-speed body-axis drag [N/(m/s)]";
@@ -136,7 +138,7 @@ protected
 equation
   motor.omega_cmd = omega_cmd;
   omega_m = motor.omega;
-  F_m = motor.thrust;
+  F_m = motor.thrust .* motor_thrust_scale;
   T = F_m[1] + F_m[2] + F_m[3] + F_m[4];
 
   V = sqrt(v_b[1] * v_b[1] + v_b[2] * v_b[2] + v_b[3] * v_b[3] + 1e-12);

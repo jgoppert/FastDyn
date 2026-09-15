@@ -30,6 +30,9 @@ except Exception:  # pragma: no cover - keeps the script usable outside FastDyn 
 
 
 DEFAULT_CONNECT = "udpin:127.0.0.1:14552"
+# ArduPilot's MAV_CMD_COMPONENT_ARM_DISARM force-arm magic.  Do not use
+# 21196 here: that value is reserved for force-disarm.
+ARDUPILOT_FORCE_ARM_MAGIC = 2989
 
 
 def parse_args() -> argparse.Namespace:
@@ -376,7 +379,7 @@ def request_arm(mav: mavutil.mavfile, *, force: bool) -> None:
         mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
         0,
         1,
-        21196 if force else 0,
+        ARDUPILOT_FORCE_ARM_MAGIC if force else 0,
         0,
         0,
         0,

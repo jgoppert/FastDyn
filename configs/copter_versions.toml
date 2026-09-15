@@ -1,0 +1,19 @@
+default = "4.7.0"
+
+[versions."4.6.2"]
+config = "configs/copter462.toml"
+firmware = "virtuals/physics/flight_controllers/courbet/bin/arducopter_v462"
+romfs_defaults = "virtuals/physics/flight_controllers/courbet/copter462/romfs/defaults.parm"
+board = "CubeBlack"
+git_revision = "1ebd4d99"
+sha256 = "3fc6ee14e94f5f8b4133b06747145a8e40c7755940b9f87fdab1ad4323c0aa8c"
+romfs_sha256 = "b7c50125471e1b6767e622420c8c843274f873b4e6fbbb2180df24277970b844"
+
+[versions."4.7.0"]
+config = "configs/copter470.toml"
+firmware = "virtuals/physics/flight_controllers/courbet/bin/arducopter_v470"
+romfs_defaults = "virtuals/physics/flight_controllers/courbet/copter470/romfs/defaults.parm"
+board = "CubeBlack"
+git_revision = "1511f271"
+sha256 = "0fda2a7185ace16727e1988b64526101408ecc217b8d8edb3553ee36cc532be7"
+romfs_sha256 = "b7c50125471e1b6767e622420c8c843274f873b4e6fbbb2180df24277970b844"

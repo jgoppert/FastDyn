@@ -6,10 +6,12 @@ model Copter
     "Inertia about the CG in body FLU [kg*m^2]";
   parameter Real Ct = 8.54858e-6 "Thrust coefficient [N/(rad/s)^2]";
   parameter Real Cm = 0.016 "Rotor torque/thrust ratio [m]";
-  parameter Real arm_length = 0.25 "Arm length [m]";
+  parameter Real arm_length = 0.215 "Arm length [m] (430 mm motor-to-motor wheelbase)";
   parameter Real Cl_p = -0.2 "Rolling moment coefficient per roll rate";
   parameter Real Cm_q = -0.2 "Pitching moment coefficient per pitch rate";
   parameter Real Cn_r = -0.1 "Yawing moment coefficient per yaw rate";
+  parameter Real motor_thrust_scale[4] = {1, 1, 1, 1}
+    "Per-motor thrust effectiveness multiplier for fault/robustness studies";
   parameter Real tau_up = 0.0125 "Motor spin-up time constant [s]";
   parameter Real tau_down = 0.025 "Motor spin-down time constant [s]";
   parameter Real body_area = 0.1 "Reference area for rate damping [m^2]";
@@ -29,13 +31,14 @@ model Copter
     vehicle_mass = mass,
     J = inertia,
     gravity = 9.8,
-    mag_world_enu = {0.21, 0, -0.45},
+    mag_world_enu = earth_mag_enu,
     Ct = Ct,
     Cm = Cm,
     arm_length = arm_length,
     Cl_p = Cl_p,
     Cm_q = Cm_q,
     Cn_r = Cn_r,
+    motor_thrust_scale = motor_thrust_scale,
     tau_up = tau_up,
     tau_down = tau_down,
     S = body_area,
@@ -58,6 +61,16 @@ model Copter
   parameter Real accel_bias[3] = {0, 0, 0} "Accelerometer bias [m/s^2]";
   parameter Real gyro_bias[3] = {0, 0, 0} "Gyroscope bias [rad/s]";
   parameter Real mag_bias[3] = {0, 0, 0} "Magnetometer bias [Gauss]";
+  parameter Real mag_motor_bias[3] = {0, 0, 0}
+    "Magnetometer bias at full normalized mean motor load [Gauss]";
+  parameter Real earth_mag_enu[3] = {0.21, 0, -0.45}
+    "Earth magnetic field in world ENU axes [Gauss]";
+  parameter Real current_idle_a = 0.0
+    "Empirical current proxy intercept [A]";
+  parameter Real current_per_motor_load_a = 0.0
+    "Empirical current proxy slope versus normalized mean motor load [A]";
+  parameter Real mag_current_slope[3] = {0, 0, 0}
+    "Body-FRD magnetometer bias slope versus estimated current [Gauss/A]";
   parameter Real gps_bias[3] = {0, 0, 0} "GPS bias N/E/altitude [m]";
   parameter Real baro_alt_bias = 0.0 "Barometer relative altitude bias [m]";
   parameter Real earth_radius_m = 6378137.0 "Spherical Earth radius used for local geodetic conversion [m]";
@@ -76,6 +89,7 @@ model Copter
   output Real baro_temperature_c "Barometer temperature [degC]";
   output Real baro_climb_rate_mps "Barometer climb rate [m/s]";
   output Real motor_cmd[4] "Motor commands after PWM scaling [rad/s]";
+  output Real estimated_current_a "Empirical propulsion-current proxy [A]";
 
 protected
   Real pwm_span;
@@ -83,6 +97,7 @@ protected
   Real gps_lat_lon[2];
   Real geodetic_origin[3] "Reference latitude, longitude, and Earth radius";
   Real yaw_rad;
+  Real mean_motor_load;
 
 equation
   pwm_span = pwm_max - pwm_min;
@@ -95,7 +110,12 @@ equation
 
   accel = {plant.accel[1], -plant.accel[2], -plant.accel[3]} + accel_bias;
   gyro = {plant.gyro[1], -plant.gyro[2], -plant.gyro[3]} + gyro_bias;
-  mag = {plant.mag[1], -plant.mag[2], -plant.mag[3]} + mag_bias;
+  mean_motor_load = sum(plant.omega_m .* plant.omega_m) /
+    (4.0 * max(1.0, omega_max * omega_max));
+  estimated_current_a = max(0.0,
+    current_idle_a + current_per_motor_load_a * mean_motor_load);
+  mag = {plant.mag[1], -plant.mag[2], -plant.mag[3]} + mag_bias +
+    mag_motor_bias * mean_motor_load + mag_current_slope * estimated_current_a;
 
   // Avoid collisions between the caller parameters and the function locals
   // during function projection in the pinned Rumoca compiler.

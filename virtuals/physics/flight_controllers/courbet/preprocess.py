@@ -97,7 +97,10 @@ def convert_config_file(symbols_dict: dict[str, int], input: str, output: str) -
                             print(f"Warning: {third_token} not found in symbols dictionary")
                             # return False
 
-                output_file.write(f"{first_token} {second_token} {third_token if third_token else ''}\n")
+                output_tokens = [first_token, second_token]
+                if third_token:
+                    output_tokens.append(third_token)
+                output_file.write(" ".join(output_tokens) + "\n")
 
     return True
 
