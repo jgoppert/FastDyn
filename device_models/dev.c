@@ -76,13 +76,24 @@ static inline void dev_get_timestamp(time_t *sec, long *usec) {
 	}
 }
 
+/* The access log is usually off, and a clock read per MMIO access and per
+ * interrupt is measurable at tens of thousands of accesses per second. */
+static inline void dev_get_timestamp_if_logging(time_t *sec, long *usec) {
+	if (io_logger != NULL) {
+		dev_get_timestamp(sec, usec);
+	} else {
+		*sec = 0;
+		*usec = 0;
+	}
+}
+
 static int dev_write(char * handler, long unsigned int address, uint64_t value, long unsigned int size) {
     uint64_t pc = core_get_pc();
 #ifdef DEV_LOGGER
     uint64_t icount = core_get_icount();
     time_t sec;
     long usec;
-    dev_get_timestamp(&sec, &usec);
+    dev_get_timestamp_if_logging(&sec, &usec);
 #endif
     DeviceNode **lut = dev_select_lut(address);
     if (!lut) {
@@ -153,7 +164,7 @@ static int dev_read(char * handler, long unsigned int address, uint64_t *buf, lo
     uint64_t icount = core_get_icount();
     time_t sec;
     long usec;
-    dev_get_timestamp(&sec, &usec);
+    dev_get_timestamp_if_logging(&sec, &usec);
 #endif
     uint64_t value = 0; // Default value
     DeviceNode **lut = dev_select_lut(address);
@@ -254,7 +265,7 @@ void dev_notify_irq(int number) {
 #ifdef DEV_LOGGER
 	time_t sec;
     long usec;
-    dev_get_timestamp(&sec, &usec);
+    dev_get_timestamp_if_logging(&sec, &usec);
 #endif
 	DeviceNode *head = irq_lut[number];
 #ifdef DEV_LOGGER
@@ -294,7 +305,7 @@ void dev_irqret_hook(int number) {
 #ifdef DEV_LOGGER
     time_t sec;
     long usec;
-    dev_get_timestamp(&sec, &usec);
+    dev_get_timestamp_if_logging(&sec, &usec);
 #endif
 #ifdef DEV_LOGGER
         if (twintrace_mode != TT_OFF) {
