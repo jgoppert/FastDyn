@@ -7,6 +7,7 @@
 #include "models.c"
 #include "cJSON.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 extern twintrace_mode_t twintrace_mode;
 extern const char *twintrace_bin_path;
@@ -798,7 +799,23 @@ int dev_init(int argc, char ** argv) {
 		// Regisgter IRQ listener for logging
 	    core_register_irq_hook(dev_notify_irq, dev_irqret_hook);
 		qemu_plugin_unimp_export_device((void *)&importer);
-		io_logger = fopen("io.log", "w");
+		/* The access log costs a formatted write and an fflush per MMIO
+		 * access and interrupt. A firmware that services its system timer
+		 * through a device model can make tens of thousands of these per
+		 * second, which throttles the whole simulation to about real time,
+		 * so the log is only kept when something consumes it: twintrace
+		 * recording, a probe run feeding the trace analyzer, or an explicit
+		 * FASTDYN_IO_LOG (a path, or 1 for io.log; 0 suppresses it). */
+		{
+			const char *io_log = getenv("FASTDYN_IO_LOG");
+			if ((twintrace_mode != TT_OFF || probe_is_enabled()) &&
+			    (io_log == NULL || io_log[0] == '\0')) {
+				io_log = "1";
+			}
+			if (io_log != NULL && io_log[0] != '\0' && strcmp(io_log, "0") != 0) {
+				io_logger = fopen(strcmp(io_log, "1") == 0 ? "io.log" : io_log, "w");
+			}
+		}
 
 		if (start_ts.tv_sec == 0 && start_ts.tv_nsec == 0) {
 			    clock_gettime(CLOCK_MONOTONIC, &start_ts);

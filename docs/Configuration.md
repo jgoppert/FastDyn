@@ -307,6 +307,17 @@ model = "classic"
 enabled = false
 ```
 
+Every access that reaches a device model, and every interrupt the plugin
+observes, can be written to `io.log` in the QEMU working directory. That log
+is what twintrace recording and the trace analyzer consume, so it is kept
+automatically for twintrace and probe runs. For any other run it stays off,
+because a firmware that services its system timer through a device model makes
+tens of thousands of these accesses per second and the formatted, flushed
+write behind each one holds the whole simulation to about real time. Set
+`FASTDYN_IO_LOG=1` in the environment of a run to keep `io.log` anyway, or
+`FASTDYN_IO_LOG=<path>` to write it elsewhere; `FASTDYN_IO_LOG=0` suppresses
+it even for a twintrace or probe run.
+
 ## Parallel Runs
 
 `fastdyn swarm` runs many isolated copies of one config. Each worker receives

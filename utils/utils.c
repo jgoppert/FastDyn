@@ -28,6 +28,9 @@ char * utils_get_arg(const char * key, int argc, char **argv) {
 
 void utils_log_to_file(FILE *fp, const char *fmt, ...) {
     va_list args;
+    if (fp == NULL) {
+        return;
+    }
     va_start(args, fmt);
     vfprintf(fp, fmt, args);
     va_end(args);
